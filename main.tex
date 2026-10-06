@@ -1,0 +1,55 @@
+\documentclass[11pt,oneside]{report}
+\usepackage{plnotes}
+
+\begin{document}
+
+\begin{titlepage}
+  \raggedright
+  \vspace*{2in}
+  {\Huge\bfseries CSCI-GA 2110\par}
+  \vspace{8pt}
+  {\LARGE Programming Languages\par}
+  \vspace{8pt}
+  {\LARGE Course Notes\par}
+  \vspace{8pt}
+  {\Large Fall 2026\par}
+  \vspace{24pt}
+  {\large Instructor: Prof.\ Joseph Tassarotti\par}
+  \vspace{4pt}
+  {\large Recitation leaders: Seong-Heon Jung and Vishnu Satish\par}
+  \vspace{4pt}
+  {\large Notes by You Li\par}
+\end{titlepage}
+
+\thispagestyle{fancy}
+\markright{}
+{\Large\bfseries Acknowledgements\par}
+\vspace{6pt}
+These notes follow the Fall 2026 offering of CSCI-GA 2110 (Programming Languages) at the Courant Institute, taught by Prof.\ Joseph Tassarotti, with recitations led by Seong-Heon Jung and Vishnu Satish. The course studies programming languages by \emph{implementing} them: each new language feature is added to an interpreter written in Racket, following Krishnamurthi's \emph{Programming Languages: Application and Interpretation}~\cite{PLAI}.
+
+Each chapter covers one week: first the lecture, split into one section per topic, then that week's recitation. The code is the code shown in lecture and the recitation handouts; recitation solutions are the ones posted by the teaching assistants. Sections and subsections marked (SUPPLEMENT) go beyond the course material, drawing mainly on \cite{PLAI}, \cite{HtDP}, \cite{SICP}, and \cite{TAPL}.
+
+\paragraph{Notation.} Code is Racket (\code{\#lang racket}) in \Cref{ch:week1,ch:week2} and \code{\#lang plai-typed} from \Cref{ch:week3} on. Interactions at the REPL are shown with a \code{>} prompt; in \code{plai-typed} the line starting with \code{-} is the type the checker reports, and the line after it is the value. A trace such as
+\begin{lstlisting}[style=repl]
+(fact 2)
+---> (* 2 (fact 1))
+\end{lstlisting}
+shows one evaluation step per line. In the interpreter chapters, $e$ ranges over expressions of the language being implemented, $\subst{e}{v}{x}$ is $e$ with $v$ substituted for the free occurrences of $x$, and $\FV(e)$ is the set of free variables of $e$. Type names such as \tyname{ArithE} are set in sans serif in prose.
+
+\tableofcontents
+
+\include{chapters/ch01-week1}
+\include{chapters/ch02-week2}
+\include{chapters/ch03-week3}
+\include{chapters/ch04-week4}
+
+\begin{thebibliography}{9}
+\bibitem{PLAI} S.~Krishnamurthi. \emph{Programming Languages: Application and Interpretation}, 2nd edition. 2017. \url{https://cs.brown.edu/~sk/Publications/Books/ProgLangs/}
+\bibitem{HtDP} M.~Felleisen, R.~B. Findler, M.~Flatt, and S.~Krishnamurthi. \emph{How to Design Programs}, 2nd edition. MIT Press, 2018. \url{https://htdp.org}
+\bibitem{SICP} H.~Abelson and G.~J. Sussman. \emph{Structure and Interpretation of Computer Programs}, 2nd edition. MIT Press, 1996.
+\bibitem{RacketGuide} M.~Flatt, R.~B. Findler, and PLT. \emph{The Racket Guide}. \url{https://docs.racket-lang.org/guide/}
+\bibitem{TAPL} B.~C. Pierce. \emph{Types and Programming Languages}. MIT Press, 2002.
+\bibitem{Reynolds} J.~C. Reynolds. Definitional interpreters for higher-order programming languages. In \emph{Proceedings of the ACM Annual Conference}, 1972.
+\end{thebibliography}
+
+\end{document}

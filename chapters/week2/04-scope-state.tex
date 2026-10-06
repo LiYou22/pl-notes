@@ -1,0 +1,137 @@
+\section{Scope and State}
+\label{sec:scopestate}
+
+\subsection{\texttt{let} and \texttt{let*}}
+
+\code{let} binds names to values for the extent of its body. The clauses go in one pair of brackets; square and round brackets are interchangeable in Racket, so both of these are the same form:
+\begin{lstlisting}
+(let ([x (+ 1 2)])
+  (+ x x))            ; 6
+
+(let [(x (+ 1 2))
+      (y (+ 4 5))]
+  (+ x y))            ; 12
+\end{lstlisting}
+
+The catch is \emph{when} each name starts to exist. \code{let} evaluates all of its right-hand sides first, in the scope \emph{outside} the \code{let}, and only then binds the names. So a later clause cannot use an earlier one:
+\begin{lstlisting}
+(let ([x (+ 1 2)]
+      [y (+ 1 x)])     ; x is not bound here
+  (+ x y))
+;; x: undefined; cannot reference an identifier before its definition
+\end{lstlisting}
+Read the message as ``that name is not in scope here''.
+
+\code{let*} binds the clauses one at a time, each in the scope of the previous ones, so this version works and gives 7:
+\begin{lstlisting}
+(define let-example
+  (let* ([x (+ 1 2)]
+         [y (+ 1 x)])
+    (+ x y)))
+\end{lstlisting}
+There is no magic in \code{let*}; it is nested \code{let}s:
+\[
+\code{(let* ([x a] [y b]) body)} \quad\text{means}\quad \code{(let ([x a]) (let ([y b]) body))}.
+\]
+Use \code{let} by default, since it tells the reader the bindings are independent, and \code{let*} only when a clause really needs the one above it. Neither lets a clause refer to \emph{itself}: a local recursive function needs \code{letrec}, or the named \code{let} of \Cref{sec:listsrec}.
+
+\subsection{Lexical Scope}
+
+A \code{let} is an expression, so it can appear anywhere a value can, including in another \code{let}'s right-hand side:
+\begin{lstlisting}
+(define nested-let-example
+  (let ([x (let ([y 3]) (+ y y))])
+    (+ x x)))           ; x = 6, so 12
+\end{lstlisting}
+But \code{y} exists only inside the inner \code{let}. Writing \rkt|(+ x y)| in the outer body is the same undefined-identifier error, even though \code{y} was ``used'' a moment earlier (\Cref{fig:scope}).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[tok/.style={inner sep=1.5pt, font=\ttfamily\normalsize, anchor=base west}]
+  \node[tok] (a1) at (0,0) {(let ([x};
+  \node[tok, right=1mm of a1.base east, anchor=base west, draw, fill=uspace, rounded corners=2pt, inner sep=3pt] (inner) {(let ([y 3]) (+ y y))};
+  \node[tok, right=0pt of inner.base east, anchor=base west] (a2) {])};
+  \node[tok] (b1) at (0.6,-0.9) {(+ x};
+  \node[tok, right=0pt of b1.base east, anchor=base west, text=sigc] (y) {\,y};
+  \node[tok, right=0pt of y.base east, anchor=base west] (b2) {))};
+  \begin{scope}[on background layer]
+    \node[draw, fill=kspace!50, rounded corners=3pt, fit=(a1)(inner)(a2)(b2), inner sep=6pt] (outer) {};
+  \end{scope}
+  \node[lbl, right=3mm of a2] {scope of \code{y}: the green box};
+  \node[lbl, right=3mm of b2, align=left] {scope of \code{x}: the body;\\ \code{y} is \emph{not} visible here};
+\end{tikzpicture}
+\caption{Scopes nest like the text. The body of the outer \code{let} is outside the inner \code{let}, so \code{y} is unbound there.}
+\label{fig:scope}
+\end{figure}
+
+\begin{definition}[Lexical scope]
+Under \emph{lexical} (static) scope, which binding a use of a name refers to is determined by where the binding is \emph{written} in the program text, not by what happened to run before.
+\end{definition}
+
+This is the same rule that makes the closure in \code{make-adder} work: the \code{x} in \code{(lambda (y) (+ x y))} refers to the \code{x} of the enclosing \code{define}, wherever the returned function is later called.
+
+\subsection{Pure Code and Side Effects}
+
+Everything so far is \emph{pure}: a call depends only on its arguments and does nothing but return a value. Run the same expression twice and you get the same answer, so an expression can always be replaced by its value without changing the program. That is what makes the step-by-step traces of \code{rev} and the folds valid reasoning, not just illustration.
+
+A \emph{side effect} is anything else a call does: printing, mutating a variable, reading input, raising an error. In a language built on statements, \code{i++} is exactly this. Running it twice is not the same as running it once, so it cannot be replaced by its value.
+\begin{itemize}
+  \item \code{"Hello World"} is a value. Evaluating it does nothing else.
+  \item \rkt|(print "Hello World")| writes to the console and returns \code{(void)}. The output is the point; the return value is not.
+\end{itemize}
+Racket does not forbid effects; it makes them ordinary expressions, so staying pure is a choice made function by function.
+
+\subsubsection{Sequencing} A function body may hold several expressions. They run in order, the earlier ones only for their effects, and the value of the \emph{last} one is returned:
+\begin{lstlisting}
+(define (foo x)
+  (print "Hello")
+  (+ x 1))
+\end{lstlisting}
+\rkt|(foo 1)| returns 2 and prints along the way. The returned number is perfectly predictable; the printing is what makes \code{foo} impure. \code{begin} is the same sequencing as a single expression, for places where only one expression is allowed, such as a \code{cond} branch or an arm of \code{if}:
+\begin{lstlisting}
+(begin
+  (print "Hello")
+  (print "World")
+  (+ 1 2))          ; returns 3, after printing
+\end{lstlisting}
+
+\subsubsection{Three ways to print} All return \code{(void)}; they differ only in what appears on the console. \rkt|(print "Hello")| shows \code{"Hello"}, the value as Racket would write it, quotes included. \rkt|(display "Hello")| shows \code{Hello}, the human-readable form. \rkt|(printf "The number foo is: ~a !" (* 3 3))| shows \code{The number foo is: 9 !}: \code{\textasciitilde a} splices in the display form of the next argument.
+
+\subsection{Boxes: State You Can See}
+
+A \emph{box} is a mutable container with exactly one slot, the smallest possible piece of state. It is a value like any other, so it can be passed to a function that changes it.
+\begin{lstlisting}
+(define bar (box 3))
+
+(define (increment-box b)
+  (set-box! b (+ 1 (unbox b))))
+\end{lstlisting}
+\rkt|(box 3)| makes a box, \rkt|(unbox bar)| reads it, and \rkt|(set-box! bar 10)| overwrites it and returns \code{(void)}. \code{increment-box} is called for its effect and returns nothing useful, so the caller has to \code{unbox} afterwards to see the new contents:
+\begin{lstlisting}
+(let ([b (box 3)])
+  (increment-box b)
+  (unbox b))          ; 4
+\end{lstlisting}
+
+The point of a box is that mutability is \emph{visible}. A plain 3 can never change; a box holding 3 announces that someone may change it, so a reader can tell where the state lives. By convention, a name ending in \code{!} mutates something: a warning that calling it twice is not the same as calling it once.
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{\code{letrec}} \code{letrec} makes the new names visible in all the right-hand sides, so they can refer to themselves and each other:
+\begin{lstlisting}
+(letrec ([even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))]
+         [odd?  (lambda (n) (if (= n 0) #f (even? (- n 1))))])
+  (even? 10))         ; #t
+\end{lstlisting}
+Internal \code{define}s in a function body behave like \code{letrec}. Implementing recursion in an interpreter is surprisingly subtle; \cite[Chapter~9]{PLAI} shows that it needs either mutation or a fixed-point trick.
+
+\subsubsection{Dynamic scope} The alternative to lexical scope is \emph{dynamic} scope, where a name refers to its most recent binding \emph{at run time}. Under dynamic scope,
+\begin{lstlisting}
+(define (f) x)
+(let ([x 5]) (f))
+\end{lstlisting}
+would return 5, because \code{x} was bound to 5 when \code{f} ran; under lexical scope it is an error, since no \code{x} is visible where \code{f} is written. Early Lisps and Emacs Lisp (by default) used dynamic scope. It makes a function's meaning depend on every caller, which is why almost all modern languages are lexically scoped. Racket offers a controlled form of dynamic binding through \emph{parameters} (\code{make-parameter}, \code{parameterize}).
+
+\subsubsection{Boxes vs.\ \code{set!}} Racket also has \code{set!}, which mutates a variable directly: \rkt|(set! x (+ x 1))|. Boxes make the mutable thing a first-class value; \code{set!} makes every variable potentially mutable, which complicates reasoning (and closures that capture a mutated variable see the change). \cite[Chapter~8]{PLAI} implements both and explains why they need different machinery in an interpreter: a \emph{store} that maps locations to values, threaded through every evaluation step.
+
+\subsubsection{Referential transparency} ``An expression can be replaced by its value'' is called \emph{referential transparency}. It is what licenses equational reasoning and compiler optimizations such as common-subexpression elimination. Languages such as Haskell enforce it everywhere and track effects in types; Racket leaves it to discipline.

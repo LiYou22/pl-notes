@@ -1,0 +1,219 @@
+\section{Recitation 2: Boolean Expressions}
+\label{sec:rec2}
+
+This recitation builds the course's first interpreter and first program transformation, for a tiny language of Boolean expressions. Everything is in plain Racket, with structs and \code{match}.
+
+\subsection{The Language and Its Representation}
+
+The grammar of \emph{bexp}:
+\[
+\langle\textit{bexp}\rangle \;::=\; \langle\textit{boolean}\rangle \;\mid\; \langle\textit{bexp}\rangle \land \langle\textit{bexp}\rangle \;\mid\; \langle\textit{bexp}\rangle \lor \langle\textit{bexp}\rangle \;\mid\; \neg \langle\textit{bexp}\rangle
+\]
+One struct per alternative of the grammar represents it in Racket:
+\begin{lstlisting}
+(struct leaf-node (arg))
+(struct or-node (left right))
+(struct and-node (left right))
+(struct not-node (arg))
+
+(define bexp-bool-1 (and-node (leaf-node #t) (leaf-node #f)))
+(define bexp-sym-1 (and-node (leaf-node 'x) (leaf-node 'y)))
+\end{lstlisting}
+A value built from these structs is an \emph{abstract syntax tree}: the tree structure replaces parentheses and precedence. Note that the structs are \emph{not} transparent and their fields are unchecked: \code{bexp-sym-1} has symbols, not booleans, at its leaves, and Racket accepts it.
+
+\begin{exercise}[Syntactic equality]
+Write \code{syn-equal?}, which checks whether two bexps are the same tree.
+\end{exercise}
+\begin{solution}
+Because the structs are opaque, \code{equal?} would compare them by identity (\Cref{sec:structs}), so we write structural equality ourselves. \code{match*} matches several values at once, one pattern per value:
+\begin{lstlisting}
+(define (syn-equal? b1 b2)
+  (match* (b1 b2)
+    [((and-node l1 r1) (and-node l2 r2)) (and (syn-equal? l1 l2) (syn-equal? r1 r2))]
+    [((or-node l1 r1) (or-node l2 r2))   (and (syn-equal? l1 l2) (syn-equal? r1 r2))]
+    [((not-node a1) (not-node a2))       (syn-equal? a1 a2)]
+    [((leaf-node v1) (leaf-node v2))     (equal? v1 v2)]
+    [(_ _) #f]))
+\end{lstlisting}
+One clause per variant where both sides agree, and a final catch-all for mismatched shapes.
+\end{solution}
+
+\begin{pitfall}[A missing variant hides behind a catch-all]
+If the \code{not-node} clause were left out, two \code{not-node}s would fall through to \rkt|[(_ _) #f]|, and \code{syn-equal?} would say a negation is not equal to itself. Nothing would complain, and every later test comparing expressions with a negation would fail even with a correct optimizer. With a catch-all clause present, check the list of variants, not just the clauses you were given.
+\end{pitfall}
+
+\subsection{An Interpreter for bexp}
+
+\begin{exercise}[Interpreter]
+Write \code{evaluate-bexp}, which computes the Boolean value an expression represents.
+\end{exercise}
+\begin{solution}
+One clause per variant, and a recursive call wherever a variant contains a sub-expression:
+\begin{lstlisting}
+(define (evaluate-bexp b)
+  (match b
+    [(leaf-node v)    v]
+    [(or-node b1 b2)  (or (evaluate-bexp b1) (evaluate-bexp b2))]
+    [(and-node b1 b2) (and (evaluate-bexp b1) (evaluate-bexp b2))]
+    [(not-node b1)    (not (evaluate-bexp b1))]))
+
+(check-expect (evaluate-bexp (leaf-node #t)) #t)
+(check-expect (evaluate-bexp (and-node (leaf-node #t) (leaf-node #f))) #f)
+(check-expect (evaluate-bexp (and-node (leaf-node #f) (leaf-node #t))) #f)
+\end{lstlisting}
+The third test swaps the arguments of the second; testing both orders is cheap and catches an implementation that looks at only one side.
+\end{solution}
+
+This is the pattern of every interpreter in the course: our language's $\land$ is implemented by Racket's \code{and}, its $\lor$ by \code{or}, its $\neg$ by \code{not}. The \emph{meaning} of each construct is given by the clause that handles it.
+
+\subsubsection{Missing cases} What happens with an incomplete \code{match}?
+\begin{lstlisting}
+(define (evaluate-bexp-m b)
+  (match b
+    [(leaf-node v) v]))
+\end{lstlisting}
+Nothing complains when it is defined. The error appears only when it is called on a value that no clause matches: \rkt|(evaluate-bexp-m bexp-bool-1)| raises \code{match: no matching clause}. Racket checks patterns at run time, so a missing case is found only if some test happens to reach it. \Cref{sec:rec3} redoes this in \code{plai-typed}, where the same mistake is rejected before the program runs.
+
+\subsection{An Optimization Pass: De Morgan}
+
+De Morgan's laws and double-negation elimination state the equivalences
+\[
+\neg(P \land Q) = \neg P \lor \neg Q, \qquad \neg(P \lor Q) = \neg P \land \neg Q, \qquad \neg\neg P = P.
+\]
+Using them left to right, an optimizer can eliminate redundant negations and push every remaining negation down to the leaves. The examples use symbolic leaves:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+name & before & after \\
+\midrule
+\code{bexp-1} & $\neg(\neg P \lor Q)$ & $P \land \neg Q$ \\
+\code{bexp-2} & $\neg\neg P \lor \neg Q$ & $P \lor \neg Q$ \\
+\code{bexp-3} & $P \lor \neg Q$ & $P \lor \neg Q$ (already optimal) \\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{lstlisting}
+(define bexp-1 (not-node (or-node (not-node (leaf-node 'P)) (leaf-node 'Q))))
+(define bexp-2 (or-node (not-node (not-node (leaf-node 'P))) (not-node (leaf-node 'Q))))
+(define bexp-3 (or-node (leaf-node 'P) (not-node (leaf-node 'Q))))
+
+(define bexp-1-opt (and-node (leaf-node 'P) (not-node (leaf-node 'Q))))
+(define bexp-2-opt (or-node (leaf-node 'P) (not-node (leaf-node 'Q))))
+(define bexp-3-opt (or-node (leaf-node 'P) (not-node (leaf-node 'Q))))
+\end{lstlisting}
+
+\subsubsection{What does it mean for an optimization to be correct?} Before writing the optimizer, decide how to check it. An optimization is correct when it does two things:
+\begin{enumerate}
+  \item it \emph{preserves semantics}: the output evaluates to the same value as the input;
+  \item it actually \emph{optimizes}: the output has the promised shape, here every negation sitting directly on a leaf.
+\end{enumerate}
+Both become executable checks:
+\begin{lstlisting}
+(define (preserves-sem? unopt)
+  (equal? (evaluate-bexp unopt) (evaluate-bexp (demorgan-opt unopt))))
+
+(define (is-optimizing? opt)
+  (define (only-not-at-leaves? bexp)
+    (match bexp
+      [(leaf-node v) #t]
+      [(or-node b1 b2) (and (only-not-at-leaves? b1) (only-not-at-leaves? b2))]
+      [(and-node b1 b2) (and (only-not-at-leaves? b1) (only-not-at-leaves? b2))]
+      [(not-node (leaf-node v)) #t]
+      [(not-node _) #f]))
+  (only-not-at-leaves? opt))
+
+(define (is-correct? unopt)
+  (and (preserves-sem? unopt) (is-optimizing? (demorgan-opt unopt))))
+\end{lstlisting}
+\code{is-optimizing?} relies on \code{match} trying clauses in order: \rkt|(not-node (leaf-node v))| is tried first, so the catch-all \rkt|(not-node _)| sees only negations of compound expressions, which mean the pass left work undone. Note also that \code{preserves-sem?} takes only the input and calls \code{demorgan-opt} itself, so it tests the optimizer rather than a hand-written answer.
+
+\subsubsection{The optimizer} What to do with a negation depends entirely on what is \emph{inside} it, so a single \rkt|(not-node b1)| clause cannot work. Nested patterns split it into the four shapes the argument can have, one per variant. This is what the handout means by ``you will need more cases than in \code{evaluate-bexp}'':
+\begin{lstlisting}
+(define (demorgan-opt b)
+  (match b
+    ; Standard Stuff
+    [(leaf-node v)    (leaf-node v)]
+    [(or-node b1 b2)  (or-node (demorgan-opt b1) (demorgan-opt b2))]
+    [(and-node b1 b2) (and-node (demorgan-opt b1) (demorgan-opt b2))]
+    [(not-node (leaf-node l)) (not-node (leaf-node l))]
+    ; De-Morgan Stuff
+    [(not-node (and-node b1 b2))
+     (or-node (demorgan-opt (not-node b1)) (demorgan-opt (not-node b2)))]
+    [(not-node (or-node b1 b2))
+     (and-node (demorgan-opt (not-node b1)) (demorgan-opt (not-node b2)))]
+    [(not-node (not-node b1)) (demorgan-opt b1)]))
+\end{lstlisting}
+\begin{itemize}
+  \item \textbf{A negated leaf} is already as far down as a negation can go; keep it.
+  \item \textbf{De Morgan.} After rewriting $\neg(b_1 \land b_2)$ to $\neg b_1 \lor \neg b_2$, the new negations may themselves sit on top of an \code{and}, an \code{or}, or a \code{not}, so they are optimized again: the recursive calls are on \rkt|(not-node b1)|, not on \code{b1}. Calling \rkt|(demorgan-opt b1)| would drop the negation and change the meaning.
+  \item \textbf{Double negation.} The two negations cancel, and the result is \rkt|(demorgan-opt b1)|, not just \code{b1}, because \code{b1} may still contain negations to push down.
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[level distance=9mm, sibling distance=14mm, every node/.style={ast}]
+  \node[asth] {not}
+    child {node {or}
+      child {node[asth] {not} child {node[astl] {P}}}
+      child {node[astl] {Q}}};
+  \node[draw=none, fill=none, font=\small] at (0,-3.6) {$\neg(\neg P \lor Q)$};
+\end{tikzpicture}
+\hspace{0.8cm}
+\begin{tikzpicture}
+  \draw[arr] (0,0) -- (1.6,0) node[midway, above, lbl] {\code{demorgan-opt}};
+  \node at (0,-1.6) {};
+\end{tikzpicture}
+\hspace{0.8cm}
+\begin{tikzpicture}[level distance=9mm, sibling distance=14mm, every node/.style={ast}]
+  \node {and}
+    child {node[astl] {P}}
+    child {node[asth] {not} child {node[astl] {Q}}};
+  \node[draw=none, fill=none, font=\small] at (0,-3.6) {$P \land \neg Q$};
+\end{tikzpicture}
+\caption{\code{bexp-1} before and after the pass. Negations (yellow) end up only directly above leaves.}
+\label{fig:demorgan}
+\end{figure}
+
+For \code{bexp-1} (\Cref{fig:demorgan}):
+\begin{lstlisting}[style=repl]
+(demorgan-opt (not (or (not P) Q)))
+---> (and-node (demorgan-opt (not (not P))) (demorgan-opt (not Q)))   ; not over or
+---> (and-node (demorgan-opt P) (not Q))                              ; not-not cancels
+---> (and-node P (not Q))
+\end{lstlisting}
+
+\subsubsection{Why it terminates} Every recursive call is on a smaller tree. In the De Morgan cases the argument \rkt|(not-node b1)| is new, but it is smaller than the input \rkt|(not-node (and-node b1 b2))|, which has one more node and all of \code{b2} besides.
+
+\subsection{Testing the Optimizer Two Ways}
+
+The syntactic tests compare against the exact trees written by hand:
+\begin{lstlisting}
+(check-expect (syn-equal? (demorgan-opt bexp-1) bexp-1-opt) #t)
+(check-expect (syn-equal? (demorgan-opt bexp-2) bexp-2-opt) #t)
+(check-expect (syn-equal? (demorgan-opt bexp-3) bexp-3-opt) #t)
+\end{lstlisting}
+The semantic tests check the two correctness properties without writing the expected tree at all:
+\begin{lstlisting}
+(define bexp-4 (not-node (or-node (not-node (leaf-node #t)) (leaf-node #f))))
+(define bexp-5 (or-node (not-node (not-node (leaf-node #t))) (not-node (leaf-node #f))))
+(define bexp-6 (or-node (leaf-node #t) (not-node (leaf-node #t))))
+(check-expect (is-correct? bexp-4) #t)
+(check-expect (is-correct? bexp-5) #t)
+(check-expect (is-correct? bexp-6) #t)
+\end{lstlisting}
+
+\begin{remark}[Why booleans at the leaves]
+\code{bexp-4} to \code{bexp-6} are \code{bexp-1} to \code{bexp-3} with \code{\#t} and \code{\#f} in place of \code{'P} and \code{'Q}. With symbols at the leaves, \code{evaluate-bexp} is meaningless: \rkt|(not 'P)| is \code{\#f} and \rkt|(or 'P #f)| is \code{'P}, because Racket treats every value except \code{\#f} as true. So a semantic check only means something on Boolean leaves.
+\end{remark}
+
+\begin{remark}[The handout's table]
+An earlier version of the handout listed $\neg(\neg P \land Q) \mapsto P \land Q$ as the first example. That contradicts both the code (\code{bexp-1} is built with \code{or-node}) and De Morgan's law; the posted solution corrects the row to $\neg(\neg P \lor Q) \mapsto P \land \neg Q$. Trust the definitions over the prose, and check the prose by working one example by hand.
+\end{remark}
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{Negation normal form} The output shape of \code{demorgan-opt}, with negations only on variables, is called \emph{negation normal form} (NNF). It is the first step in converting a formula to conjunctive normal form (CNF), the input format of SAT solvers. NNF conversion never increases the number of $\land$/$\lor$ nodes, but the further step to CNF can blow up exponentially without tricks such as the Tseitin transformation.
+
+\subsubsection{Testing semantics exhaustively} \code{preserves-sem?} checks one assignment of truth values per test. For symbolic expressions, a stronger test enumerates every assignment to the variables (there are $2^n$ for $n$ variables) and compares the two expressions under each, which decides equivalence completely for small $n$. Random generation of expressions plus such a check is \emph{property-based testing}, available in Racket through the \code{rackcheck} package and in Haskell as QuickCheck.
+
+\subsubsection{Short-circuiting is inherited} \code{evaluate-bexp} implements $\land$ with Racket's \code{and}, which does not evaluate its second argument when the first is \code{\#f}. Our language therefore short-circuits too, without anyone deciding it should. For a pure language like bexp this is invisible, but once the language has errors or effects it matters, and an interpreter that wants strict $\land$ must evaluate both sides first, e.g.\ \rkt|(let ([v1 ...] [v2 ...]) (and v1 v2))|. This is the inheritance problem of definitional interpreters (\Cref{sec:why}).

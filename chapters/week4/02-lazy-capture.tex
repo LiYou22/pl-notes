@@ -1,0 +1,123 @@
+\section{Lazy Substitution and Variable Capture}
+\label{sec:lazy}
+
+\subsection{Lazy Substitution}
+
+An alternative: do not evaluate \code{e1} first. Substitute the unevaluated tree into the body, where it is evaluated each time the body uses it.
+\begin{lstlisting}[style=repl]
+(let x (+ 1 1) (+ x 2))
+eager:  ---> (let x 2 (+ x 2))  ---> (+ 2 2)  ---> 4
+lazy:   ---> (+ (+ 1 1) 2)                    ---> 4
+\end{lstlisting}
+\code{subst-lazy} is \code{subst-eager} with \code{v} an \tyname{ArithE}, the unevaluated \code{e1}, which goes into the tree as is, with no \code{numC} wrapping:
+\begin{lstlisting}
+(define (subst-lazy (v : ArithE) (x : symbol) (e : ArithE)) : ArithE
+  (type-case ArithE e
+    [numC (n) e]
+    [idC (y) (if (equal? x y) v e)]
+    [plusC (e1 e2) (plusC (subst-lazy v x e1) (subst-lazy v x e2))]
+    [timesC (e1 e2) (timesC (subst-lazy v x e1) (subst-lazy v x e2))]
+    [letC (y e1 e2)
+          (letC y
+                (subst-lazy v x e1)
+                (if (equal? x y) e2 (subst-lazy v x e2)))]))
+
+(define (eval-lazy (e : ArithE)) : number
+  (type-case ArithE e
+    [numC (n) n]
+    [idC (x) (error 'eval "unbound variable")]
+    [plusC (e1 e2) (+ (eval-lazy e1) (eval-lazy e2))]
+    [timesC (e1 e2) (* (eval-lazy e1) (eval-lazy e2))]
+    [letC (y e1 e2) (eval-lazy (subst-lazy e1 y e2))]))
+\end{lstlisting}
+
+\begin{pitfall}[Mixing evaluators]
+Every recursive call in \code{eval-lazy} must be to \code{eval-lazy}. If one called \code{eval-eager}, the type checker would not complain, since both return a number, but inner \code{let}s would silently become eager.
+\end{pitfall}
+
+\subsection{Is Lazy More Efficient?}
+
+When \code{x} is unused, yes: \code{e1} is never evaluated.
+\begin{lstlisting}[style=repl]
+(let x (+ 5 6) 10)
+eager:  (let x 11 10) ---> 10      (+ 5 6) computed once, for nothing
+lazy:   10                         (+ 5 6) never computed
+\end{lstlisting}
+So \code{(let x (/ 5 0) 10)} would not be an error in the lazy version (if the language had \code{/}), and neither is an unbound name in \code{e1}: \code{(let x (+ y y) 10)} is an error eagerly but 10 lazily.
+
+When \code{x} is used more than once, lazy is \emph{less} efficient, since \code{e1} is recomputed at every use:
+\begin{lstlisting}[style=repl]
+(let x (+ 5 6) (+ (+ x x) x))
+eager:  (+ 5 6) once     ---> (+ (+ 11 11) 11)
+lazy:   (+ 5 6) 3 times  ---> (+ (+ (+ 5 6) (+ 5 6)) (+ 5 6))
+\end{lstlisting}
+
+\subsection{Where Eager and Lazy Differ}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+program & eager & lazy \\
+\midrule
+\code{(let x (+ y y) 10)} & \code{unbound variable} & \code{10} \\
+\code{(let y x (let x 2 y))} & \code{unbound variable} & \code{2} \\
+\bottomrule
+\end{tabular}
+\end{center}
+The first difference is harmless: \code{x} is unused, so lazy never evaluates \code{e1} and never notices the unbound \code{y}. The second is a real bug.
+
+\subsection{Variable Capture}
+
+\begin{lstlisting}[style=repl]
+(let x y (let y 2 (+ x y)))
+lazy:
+---> (let y 2 (+ y y))        the free y is captured by the inner let
+---> (+ 2 2)
+---> 4
+\end{lstlisting}
+The outer \code{y} is free: nothing binds it, so the correct answer is an error. Racket agrees; the same program in \code{\#lang racket} is rejected with \code{y: unbound identifier} before it runs. But lazy substitution moved that free \code{y} underneath \code{(let y 2 ...)}, where it now refers to the inner \code{y} (\Cref{fig:capture}).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[tok/.style={inner sep=0pt, font=\ttfamily\normalsize, anchor=base west}]
+  \node[tok] at (0,0) {(let x y (let y 2 (+ x y)))};
+  \node[tok] at (0,-2.2) {(let y 2 (+ y y))};
+  \node[tok] (fy) at (7\cw,0) {\phantom{x}};
+  \node[tok] (by) at (14\cw,0) {\phantom{x}};
+  \node[tok] (uy) at (23\cw,0) {\phantom{x}};
+  \draw[bind] (uy.south) to[out=-110, in=-70] (by.south);
+  \node[lbl, above=1mm of fy, text=sigc] {free};
+  \node[tok] (by2) at (5\cw,-2.2) {\phantom{x}};
+  \node[tok] (cy) at (12\cw,-2.2) {\phantom{x}};
+  \node[tok] (uy2) at (14\cw,-2.2) {\phantom{x}};
+  \draw[bind] (uy2.south) to[out=-110, in=-70] (by2.south);
+  \draw[bad] (cy.south) to[out=-120, in=-60] (by2.south);
+  \node[lbl, above=1mm of cy, text=sigc] {was free, now captured};
+  \draw[arr] (10\cw,-0.75) -- (10\cw,-1.6) node[midway, right, lbl] {\code{subst-lazy (idC 'y) 'x} on the body};
+\end{tikzpicture}
+\caption{Capture. The substituted \code{y} (red arrow) ends up bound by an inner \code{let} it had nothing to do with.}
+\label{fig:capture}
+\end{figure}
+
+Now rename the inner \code{y} to \code{z}:
+\begin{lstlisting}[style=repl]
+(let x y (let z 2 (+ x z)))
+lazy:
+---> (let z 2 (+ y z))
+---> (+ y 2)
+---> eval: unbound variable
+\end{lstlisting}
+
+\begin{keypoint}[Names of bound variables should not matter]
+The two programs differ only in renaming the inner \code{y} to \code{z}, so they must mean the same thing. Yet lazy substitution gives 4 for one and an error for the other. This bug is called \emph{variable capture}, and a substitution that can cause it is \emph{capturing}.
+\end{keypoint}
+
+Eager substitution never has this problem: it only ever substitutes numbers, and a number contains no names to capture. Lazy substitution substitutes whole expressions, which can contain free variables.
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{Evaluation strategies} The two substitution regimes are the two classic \emph{parameter-passing strategies}. Eager substitution is \emph{call-by-value}, used by Racket, OCaml, Python, Java, and most languages. Lazy substitution is \emph{call-by-name}, used for procedure parameters in Algol~60. The recomputation problem has a standard fix, \emph{call-by-need}: substitute a reference to a shared \emph{thunk} that evaluates \code{e1} the first time it is used and remembers the result. That is Haskell's evaluation strategy, and it keeps lazy's advantage (unused arguments are never evaluated) without its cost. Call-by-need gives the same results as call-by-name in a pure language; with effects, the number of times an effect happens becomes observable.
+
+\subsubsection{Laziness is visible} A strategy is not just an efficiency choice when evaluation can fail or loop. If \code{e1} loops forever, \code{(let x e1 10)} loops under call-by-value and returns 10 under call-by-name. This lets lazy languages define their own control structures as ordinary functions: \code{if} could be a function in Haskell, but not in Racket, where both branches would be evaluated before the call.
+
+\subsubsection{Capture in practice} Capture is not only a toy-interpreter bug. C preprocessor macros substitute text and capture freely: a macro body that declares \code{int tmp} silently changes the meaning of a caller's \code{tmp}. Racket's \emph{hygienic} macros rename binders automatically to prevent exactly this, which is the macro-level version of the fix in the next section.

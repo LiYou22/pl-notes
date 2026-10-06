@@ -1,0 +1,129 @@
+\section{Lists and Accumulators}
+\label{sec:listsrec}
+
+Throughout this chapter we use the names \code{empty?}, \code{first}, and \code{rest} rather than \code{null?}, \code{car}, and \code{cdr}. They mean the same thing.
+
+\subsection{\texttt{snoc}: Adding to the End}
+
+\rkt|(cons x l)| makes one new pair whose head is \code{x} and whose tail is the old list \code{l}. Nothing is copied, so adding to the \emph{front} costs $O(1)$ however long the list is.
+
+Adding to the \emph{back} is different. The old list ends in \code{'()}, and that \code{'()} cannot be replaced without rebuilding every pair on the way to it. So a back-insert walks the whole list, in $O(n)$. Racket does not provide one; we write it and call it \code{snoc}, ``cons'' backwards:
+
+\begin{lstlisting}
+(define (snoc l x)
+  (cond
+    [(empty? l) (list x)]
+    [else (cons (first l) (snoc (rest l) x))]))
+\end{lstlisting}
+
+Two shapes of input, two branches: the skeleton of almost every list function in this course. The empty case answers ``the list containing just \code{x}''; the other keeps the first element in place and hands the rest of the problem to \code{snoc}. So \rkt|(snoc '() 'x)| is \code{'(x)} and \rkt|(snoc '(1 2) 'x)| is \code{'(1 2 x)}.
+
+\subsection{Reversing, Correctly and Incorrectly}
+
+To reverse a list, reverse everything after the first element, then put the first element at the very end, which is exactly \code{snoc}:
+\begin{lstlisting}
+(define (rev l)
+  (cond
+    [(empty? l) '()]
+    [else (snoc (rev (rest l)) (first l))]))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+(rev '(1 2 3))
+---> (snoc (rev '(2 3)) 1)
+---> (snoc (snoc (rev '(3)) 2) 1)
+---> (snoc (snoc '(3) 2) 1)
+---> (snoc '(3 2) 1)
+---> '(3 2 1)
+\end{lstlisting}
+This is correct but slow: one \code{snoc} per element, each $O(n)$, so $O(n^2)$ in total. It also needs $O(n)$ stack, because the \code{snoc} is wrapped \emph{around} the recursive call, which therefore is not a tail call.
+
+Here is a tempting rewrite with \code{cons} instead of \code{snoc}:
+\begin{lstlisting}
+(define (rev-alt l)
+  (cond
+    [(empty? l) '()]
+    [else (cons (rev-alt (rest l)) (first l))]))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+> (rev-alt '(1 2 3))
+'(((() . 3) . 2) . 1)
+\end{lstlisting}
+
+\begin{pitfall}[\code{cons} is not symmetric]
+\code{cons} expects an element on the left and a list on the right. \code{rev-alt} passes them the other way round, so it builds a nest of pairs, not a list (\Cref{fig:revalt}). There is no error, because a pair may hold any two values: the wrong argument order is a \emph{silent} bug, and the dots in the output are the only sign. Swapping the arguments does not rescue this approach: \code{cons} can only ever add to the front, and reversing needs to add to the back.
+\end{pitfall}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm]
+  \node[cell] (a1) at (0,0) {}; \node[cell, right=0pt of a1] (d1) {};
+  \node[cell] (a2) at (-1.6,-1.3) {}; \node[cell, right=0pt of a2] (d2) {};
+  \node[cell] (a3) at (-3.2,-2.6) {}; \node[cell, right=0pt of a3] (d3) {};
+  \node (one) at (1.0,-1.1) {\code{1}};
+  \node (two) at (-0.6,-2.4) {\code{2}};
+  \node (three) at (-2.2,-3.7) {\code{3}};
+  \draw[ptr] (a1.center) -- (d2.north);
+  \draw[ptr] (a2.center) -- (d3.north);
+  \draw[ptr] (d1.center) -- (one);
+  \draw[ptr] (d2.center) -- (two);
+  \draw[ptr] (d3.center) -- (three);
+  \draw (a3.south west) -- (a3.north east);
+  \node[right=10mm of d1, lbl, align=left] {\code{'(((() . 3) . 2) . 1)}:\\ the \emph{car}s chain, the \emph{cdr}s hold elements};
+\end{tikzpicture}
+\caption{What \code{rev-alt} builds: every pair has a non-list on its right, hence the dots.}
+\label{fig:revalt}
+\end{figure}
+
+\subsection{Aggregating a List}
+
+Summing a list follows the same skeleton:
+\begin{lstlisting}
+(define (sum-list l)
+  (cond
+    [(empty? l) 0]
+    [else (+ (first l) (sum-list (rest l)))]))
+\end{lstlisting}
+The \code{+} sits \emph{outside} the recursive call. It cannot happen until the recursion returns, so every level must be remembered, and a long enough list runs out of stack.
+
+As with \code{fact} in \Cref{sec:exprrec}, the fix is to carry the running total as an extra argument, making the recursive call a tail call:
+\begin{lstlisting}
+(define (sum-list-helper l acc)
+  (cond
+    [(empty? l) acc]
+    [else (sum-list-helper (rest l) (+ (first l) acc))]))
+
+(define (sum-list-acc l)
+  (sum-list-helper l 0))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+(sum-list-helper '(1 2 3) 0)
+---> (sum-list-helper '(2 3) 1)
+---> (sum-list-helper '(3) 3)
+---> (sum-list-helper '() 6)
+---> 6
+\end{lstlisting}
+
+\subsection{Named \texttt{let}: Hiding the Helper}
+
+A top-level helper with an extra argument is noise. A \emph{named \code{let}} packages the same thing as a loop: the name after \code{let} becomes a local function, and the bindings give its parameters and their starting values.
+\begin{lstlisting}
+(define (sum-list-loop l)
+  (let loop ([l l]
+             [acc 0])
+    (cond
+      [(empty? l) acc]
+      [else (loop (rest l) (+ (first l) acc))])))
+\end{lstlisting}
+This is the idiomatic way to write a loop in Racket; it runs exactly like the helper version.
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{What a named \code{let} means} A named \code{let} is shorthand for defining a local recursive function and calling it immediately:
+\begin{lstlisting}
+(let loop ([l l] [acc 0]) body)
+;; means
+((letrec ([loop (lambda (l acc) body)]) loop) l 0)
+\end{lstlisting}
+\code{letrec} (\Cref{sec:scopestate}) is needed because \code{loop} refers to itself.
+
+\subsubsection{When the accumulator changes the answer} Turning \code{sum-list} into \code{sum-list-acc} is safe because \code{+} is associative and commutative: the accumulator adds the elements in the opposite grouping, $((0+1)+2)+3$ instead of $1+(2+(3+0))$. Do the same to \code{snoc}-based list building and the result comes out reversed, which is exactly how \code{reverse-helper} in \Cref{sec:rec1} works. \Cref{sec:hof} makes the two groupings precise as \code{foldl} and \code{foldr}.

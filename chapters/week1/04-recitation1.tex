@@ -1,0 +1,233 @@
+\section{Recitation 1: Functional Programming in Racket}
+\label{sec:rec1}
+
+The recitation practices the basics of the lecture in DrRacket, on a running example about traffic lights. The handout is itself a program: it is written in \code{\#lang scribble/lp2}, a literate-programming language in which code sits in named \code{@chunk} blocks inside the prose. ``Scribble HTML/PDF'' renders the document; ``Run'' runs every chunk listed in the top-level \code{<*>} chunk. Tests are written with \code{check-expect} from \code{test-engine/racket-tests}, and the final \rkt|(test)| reports the results.
+
+\subsection{Expressions and Functions}
+
+\begin{lstlisting}
+(define (is-even x)
+  (= 0 (modulo x 2)))
+\end{lstlisting}
+
+\begin{exercise}[Predict at the REPL]
+What do \code{is-even}, \rkt|(is-even)|, \rkt|(is-even 2)|, \rkt|(is-even 3)|, \rkt|(is-even #t)|, and \rkt|(is-even 'four)| evaluate to?
+\end{exercise}
+\begin{solution}
+\code{is-even} alone is the function value, printed \code{\#<procedure:is-even>}; a function is a value like any other. \rkt|(is-even)| is an \emph{arity mismatch}: the function expects one argument. \rkt|(is-even 2)| is \code{\#t} and \rkt|(is-even 3)| is \code{\#f}. \rkt|(is-even #t)| and \rkt|(is-even 'four)| are \emph{contract violations} raised inside \code{modulo}, which expects integers. Racket checks this only when the call runs: nothing stops you from writing the call.
+\end{solution}
+
+\subsubsection{Building programs by composition} In functional style, programs are built by composing functions. A traffic light is one of \code{'red}, \code{'yellow}, \code{'green}. Two functions are given:
+\begin{itemize}
+  \item \code{can-go} EXPECTS a traffic light and PRODUCES a boolean: \code{\#t} when a vehicle approaching the light may safely enter the intersection.
+  \item \code{next-light} EXPECTS a traffic light and PRODUCES the light that comes after it.
+\end{itemize}
+\begin{lstlisting}
+(define (can-go l) (equal? l 'green))
+
+(define (next-light l)
+  (match l
+    ['red    'green]
+    ['yellow 'red]
+    ['green  'yellow]))
+\end{lstlisting}
+\code{match} compares \code{l} against each pattern in turn; a quoted symbol pattern matches that symbol. (\Cref{sec:rec3} looks at \code{match} in detail.)
+
+\begin{exercise}[Pedal to the metal]
+Write \code{can-floor-it}: it EXPECTS a traffic light and PRODUCES \code{\#t} when a vehicle can safely enter the intersection at either the current light or the next one.
+\end{exercise}
+\begin{solution}
+Compose the two given functions:
+\begin{lstlisting}
+(define (can-floor-it l)
+  (or (can-go l) (can-go (next-light l))))
+(check-expect (can-floor-it 'green) #t)
+(check-expect (can-floor-it 'red) #t)
+(check-expect (can-floor-it 'yellow) #f)
+\end{lstlisting}
+Red is safe because the next light is green; yellow is not, because the next light is red.
+\end{solution}
+
+\subsection{Specifications}
+
+Before writing a function, state which inputs are valid and what output to expect. The handout's format is a list of EXPECTS and PRODUCES lines plus one sentence of meaning. For \code{next-light-iter}:
+\begin{itemize}
+  \item EXPECTS a non-negative integer \code{n} and a traffic light \code{l};
+  \item PRODUCES a traffic light: the color of \code{l} after it changes \code{n} times.
+\end{itemize}
+The specification answers the two questions the code needs. When \code{n} is zero, the light has not changed, so the answer is \code{l}. When \code{n} is positive, the answer is the light after changing $n-1$ times starting from \rkt|(next-light l)|.
+
+\begin{lstlisting}
+(define (next-light-iter n l)
+  (if (eq? n 0)
+      l
+      (next-light-iter (- n 1) (next-light l))))
+
+(check-expect (next-light-iter 0 'green) 'green)
+(check-expect (next-light-iter 1 'green) 'yellow)
+(check-expect (next-light-iter 2 'yellow) 'green)
+\end{lstlisting}
+The tests come straight from the specification: one for the base case, one for a single step, and one that wraps around the cycle (yellow, red, green). The recursive call is a tail call, with the light itself playing the role of an accumulator.
+
+\subsection{Recursion: Scrolling Through Lights}
+
+A vehicle is one of \code{'sports-car}, \code{'suv}, \code{'prius}. \code{speed} gives its speed in meters per second and \code{time-to-change} gives how many seconds a light stays on:
+\begin{lstlisting}
+(define (speed v)
+  (match v
+    ['sports-car 136]
+    ['suv        48]
+    ['prius      27]))
+
+(define (time-to-change l)
+  (match l
+    ['red    10]
+    ['yellow 2]
+    ['green  23]))
+\end{lstlisting}
+
+\begin{exercise}[Scroll]
+\code{safe-to-scroll} EXPECTS a vehicle \code{v}, a non-negative distance \code{d} in meters, and a light \code{l} that has just turned on. It PRODUCES \code{\#t} if the vehicle, driving at constant speed, enters the intersection without a violation. Hint: write a helper that decides whether the vehicle enters before the light changes.
+\end{exercise}
+\begin{solution}
+If the vehicle reaches the intersection before the light changes, the answer is whether \emph{this} light allows entry. Otherwise the problem shrinks: the vehicle has driven for one full light, so it is closer, and the light is now the next one.
+\begin{lstlisting}
+(define (will-enter v d l)
+  (<= d (* (time-to-change l) (speed v))))
+
+(define (safe-to-scroll v d l)
+  (if (will-enter v d l)
+      (can-go l)
+      (safe-to-scroll
+       v
+       (- d (* (time-to-change l) (speed v)))
+       (next-light l))))
+
+(check-expect (safe-to-scroll 'sports-car 137 'green) #t)
+\end{lstlisting}
+\end{solution}
+
+Two traces show both outcomes. A Prius covers $23 \times 27 = 621$\,m during a green light:
+\begin{lstlisting}[style=repl]
+(safe-to-scroll 'prius 1000 'green)    ; 1000 > 23*27 = 621
+---> (safe-to-scroll 'prius 379 'yellow)  ; 379 > 2*27 = 54
+---> (safe-to-scroll 'prius 325 'red)     ; 325 > 10*27 = 270
+---> (safe-to-scroll 'prius 55 'green)    ; 55 <= 621: enters on green
+---> #t
+
+(safe-to-scroll 'suv 1200 'green)      ; 1200 > 23*48 = 1104
+---> (safe-to-scroll 'suv 96 'yellow)     ; 96 <= 2*48 = 96: enters on yellow
+---> #f
+\end{lstlisting}
+The recursion terminates because every recursive call has a strictly smaller \code{d}: each light lasts a positive time and every vehicle has positive speed.
+
+\begin{remark}
+The handout's prose writes the call as \code{(safe-to-scroll v l d)}, while the posted code takes \code{(v d l)}. The code and its test are consistent, so the order is \code{(v d l)}. This is the kind of mismatch a specification is meant to catch.
+\end{remark}
+
+\subsection{Lists and Higher-Order Programming}
+
+\subsubsection{Warm-up: \code{cons} vs.\ \code{append}}
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+expression & result \\
+\midrule
+\rkt|(cons 3 4)| & \code{'(3 . 4)}, a bare pair \\
+\rkt|(cons 3 '(4))| & \code{'(3 4)} \\
+\rkt|(cons '(4) 3)| & \code{'((4) . 3)}: a pair whose \code{car} is a list \\
+\rkt|(append 3 4)| & error: \code{append: contract violation} \\
+\rkt|(append 3 '(4))| & error: the first argument must be a list \\
+\rkt|(append '(3) 4)| & \code{'(3 . 4)}: the last argument is not checked \\
+\bottomrule
+\end{tabular}
+\end{center}
+\code{cons} puts one element in front of a list; \code{append} joins lists. Neither complains about every misuse, so watch for dots in the output.
+
+\begin{exercise}[All even]
+Write \code{all-even-rec}: it EXPECTS a list of integers and PRODUCES \code{\#t} when every number in it is even.
+\end{exercise}
+\begin{solution}
+The TA solution uses \code{match} with a \code{cons} pattern, which tests for a non-empty list and names its two parts in one step:
+\begin{lstlisting}
+(define (all-even-rec l)
+  (match l
+    ['()              #t]
+    [(cons head tail) (and (is-even head) (all-even-rec tail))]))
+(check-expect (all-even-rec '()) #t)
+(check-expect (all-even-rec '(2 4 6)) #t)
+(check-expect (all-even-rec '(2 4 6 7)) #f)
+\end{lstlisting}
+The empty list is all even (there is no counterexample), which is also what makes \code{\#t} the right base value for \code{and}.
+\end{solution}
+
+\begin{exercise}[Map]
+Given \code{all}, which checks that a list of booleans is all \code{\#t}, write \code{all-even-map} without explicit recursion.
+\begin{lstlisting}
+(define (all l) (andmap identity l))
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+The intended answer is \rkt|(all (map is-even l))|: \code{map} turns the numbers into booleans and \code{all} combines them. The TA solution skips the intermediate list and passes \code{is-even} to \code{andmap} directly:
+\begin{lstlisting}
+(define (all-even-map l) (andmap is-even l))
+\end{lstlisting}
+\rkt|(andmap f l)| is \code{\#t} when \code{f} returns true on every element. It stops at the first element that fails, whereas \code{map} would first compute all the booleans.
+\end{solution}
+
+\begin{exercise}[Reverse, and reverse with a tail call]
+Write a function that reverses a list. Then write a version that uses tail-call optimization.
+\end{exercise}
+\begin{solution}
+The direct version is \code{my-reverse} from \Cref{sec:lists}, written with \code{match}:
+\begin{lstlisting}
+(define (reverse-list l)
+  (match l
+    ['() '()]
+    [(cons head tail) (append (reverse-list tail) (list head))]))
+\end{lstlisting}
+Its calls pile up pending \code{append}s:
+\begin{lstlisting}[style=repl]
+(reverse-list '(1 2 3 4 5 6 7))
+---> (append (reverse-list '(2 3 4 5 6 7)) (list 1))
+---> (append (append (reverse-list '(3 4 5 6 7)) (list 2)) (list 1))
+---> ...
+\end{lstlisting}
+On a list with millions of elements, that is a call stack millions deep. The tail-recursive version carries the reversed-so-far list in an accumulator. Moving elements one at a time from the front of \code{l} to the front of \code{acc} reverses their order, and \code{cons} is the right tool, since it adds to the front:
+\begin{lstlisting}
+(define (reverse-helper l acc)
+  (match l
+    ['() acc]
+    [(cons head tail) (reverse-helper tail (cons head acc))]))
+
+(define (reverse-list-tail l)
+  (reverse-helper l '()))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+(reverse-helper '(1 2 3) '())
+---> (reverse-helper '(2 3) '(1))
+---> (reverse-helper '(3) '(2 1))
+---> (reverse-helper '() '(3 2 1))
+---> '(3 2 1)
+\end{lstlisting}
+This is also faster: $O(n)$ instead of $O(n^2)$, since there is no \code{append}.
+\end{solution}
+
+\begin{remark}[Tail-call \emph{elimination}]
+When a language \emph{guarantees} the optimization, it is often called tail-call elimination. Racket guarantees it; many languages, including Rust and Java, do not.
+\end{remark}
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{\code{eq?} vs.\ \code{equal?}} The handout's margin asks for the difference. \code{equal?} compares structure: two lists with equal elements are \code{equal?}. \code{eq?} compares identity: are these the very same object in memory? Symbols are \emph{interned}, so two occurrences of \code{'red} are the same object and \code{eq?} works on them, which is why \code{can-go} could use either. Lists built separately are different objects:
+\begin{lstlisting}[style=repl]
+> (eq? 'red 'red)
+#t
+> (eq? (list 1) (list 1))
+#f
+> (equal? (list 1) (list 1))
+#t
+\end{lstlisting}
+\code{eqv?} sits in between: like \code{eq?}, but also compares numbers and characters by value. Use \code{equal?} unless you specifically mean identity. (\code{next-light-iter} uses \code{eq?} on numbers; \code{=} or \code{zero?} would say what is meant more clearly.)
+
+\subsubsection{The design recipe} The EXPECTS/PRODUCES format is a light version of the design recipe of \cite{HtDP}: (1) a data definition, (2) a signature and purpose statement, (3) examples, written as tests, (4) a template that follows the data definition (one case per variant, a recursive call per self-reference), (5) the body, and (6) running the tests. Most of the recursive functions in this course are written by step~4 alone.

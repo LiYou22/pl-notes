@@ -1,0 +1,115 @@
+\section{\texttt{define-type} and \texttt{type-case}}
+\label{sec:definetype}
+
+\subsection{Defining a Type with Variants}
+
+A shape is either a circle or a rectangle:
+\begin{lstlisting}
+(define-type Shape
+  [circle (radius : number)]                       ; variant 1
+  [rectangle (width : number) (height : number)])  ; variant 2
+\end{lstlisting}
+This defines one new type, \tyname{Shape}, with two \emph{variants}. Each variant has a constructor and typed fields:
+\begin{lstlisting}[style=repl]
+> (circle 3)
+- Shape
+(circle 3)
+\end{lstlisting}
+Now \rkt|(list (circle 1) (rectangle 2 3))| is fine: the elements are different kinds of shapes, but they have one type, so the list is a \code{(listof Shape)}.
+
+Like \code{struct}, \code{define-type} also generates
+\begin{itemize}
+  \item predicates \code{circle?} and \code{rectangle?}, of type \code{(Shape -> boolean)}, and
+  \item accessors \code{circle-radius}, \code{rectangle-width}, and \code{rectangle-height}, of type \code{(Shape -> number)}.
+\end{itemize}
+The predicates accept only shapes. In plain Racket \rkt|(circle? 5)| would return \code{\#f}; here it never runs:
+\begin{lstlisting}[style=repl]
+> (circle? 5)
+typecheck failed: Shape vs. number
+\end{lstlisting}
+
+\subsubsection{A recursive type} A type may mention itself. The binary tree of \Cref{sec:structs}, now with types:
+\begin{lstlisting}
+(define-type Tree
+  [emp]
+  [node (n : number) (lt : Tree) (rt : Tree)])
+\end{lstlisting}
+A variant with no fields is still a constructor, so the empty tree is \rkt|(emp)|, with parentheses. \rkt|(node 3 (emp) (emp))| has type \tyname{Tree}.
+
+\subsection{\texttt{struct} vs.\ \texttt{define-type}}
+
+Both make compound values, but they promise different things:
+\begin{center}
+\begin{tabular}{@{}p{0.47\linewidth}p{0.47\linewidth}@{}}
+\toprule
+\code{struct} (\code{\#lang racket}) & \code{define-type} (\code{plai-typed}) \\
+\midrule
+one kind of value: a \code{bt} is always a \code{bt} & one \emph{type} with several variants: \code{circle} or \code{rectangle} \\
+fields unchecked: \rkt|(bt 1 2 3)| is accepted, and fails later & every field typed: \rkt|(node 3 5 (emp))| is rejected before the program runs, at the line that is wrong \\
+different structs cannot share a homogeneous list type & all variants fit in one \code{(listof Shape)} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{Why only one \code{circle}?} No other type in the program may also have a variant named \code{circle}. The immediate reason is that \code{circle}, \code{circle?}, and \code{circle-radius} are ordinary definitions, so a second \code{define-type} would define them again (\code{identifier already defined}). The deeper reason is inference: when the checker sees \rkt|(circle 3)|, the constructor's name is all it has to go on. If two types both had a \code{circle} variant, \rkt|(circle 3)| could belong to either, and inference would be stuck.
+
+\subsection{\texttt{type-case}: Taking a Value Apart}
+
+A \code{define-type} value is built with a constructor; \code{type-case} takes it apart again. There is one clause per variant, and the names in parentheses are bound to that variant's fields, in order (the names need not match those in \code{define-type}; only the order matters):
+\begin{lstlisting}
+(define (area s)
+  (type-case Shape s
+    [circle (r) (* 3.14159 (* r r))]
+    [rectangle (w h) (* w h)]))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+> (area (circle 3))
+- number
+28.27431
+> area
+- (Shape -> number)
+\end{lstlisting}
+The same function can be written with the generated predicates and accessors:
+\begin{lstlisting}
+(define (area-v2 s)
+  (cond
+    [(circle? s) (* 3.14159 (* (circle-radius s) (circle-radius s)))]
+    [(rectangle? s) (* (rectangle-width s) (rectangle-height s))]))
+\end{lstlisting}
+It works, but \code{type-case} is shorter, names the fields, and lines the code up with the type: one clause per variant, just as list functions had one \code{cond} branch per kind of list.
+
+\subsection{Exhaustiveness}
+
+The real difference shows when a case is forgotten. \code{type-case} knows every variant of \tyname{Shape}, so leaving one out is rejected before the program runs:
+\begin{lstlisting}
+(define (area-v3 s)
+  (type-case Shape s
+    [circle (r) (* 3.14159 (* r r))]))
+;; type-case: syntax error; probable cause: you did not include a case
+;; for the rectangle variant, or no else-branch was present
+\end{lstlisting}
+\code{cond} knows nothing about \tyname{Shape}; it tries its tests in order. The same mistake with \code{cond} is accepted, works on circles, and fails only at run time when it meets a rectangle:
+\begin{lstlisting}
+(define (area-v4 s)
+  (cond
+    [(circle? s) (* 3.14159 (* (circle-radius s) (circle-radius s)))]))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+> (area-v4 (circle 1))
+- number
+3.14159
+> (area-v4 (rectangle 2 3))
+cond: no matching clause
+\end{lstlisting}
+
+\begin{keypoint}[What \code{type-case} buys]
+\code{type-case} checks before the program runs that every variant is handled, and it gives each clause the variant's fields with their types. A missing case is a static error, not a bug waiting for the right input.
+\end{keypoint}
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{Algebraic data types} A \code{define-type} is an \emph{algebraic data type}: a \emph{sum} (one of several variants) of \emph{products} (each variant a tuple of fields). The names come from counting: if a type has $|A|$ values, then $A \times B$ has $|A|\cdot|B|$ values and $A + B$ has $|A| + |B|$. The same idea appears as \code{type ... = | ...} in OCaml, \code{data} in Haskell, \code{enum} with fields in Rust and Swift, and sealed interfaces with records in Java~21. All of them check \code{match} expressions for exhaustiveness, as \code{type-case} does.
+
+\subsubsection{Why exhaustiveness is checkable} Exhaustiveness is decidable because the set of variants is \emph{closed}: \code{define-type} lists all of them in one place, and no other code can add one. Object-oriented class hierarchies are \emph{open}, since any file can add a subclass, so a compiler cannot check that a chain of \code{instanceof} tests is complete. This is one side of the ``expression problem'': with variants, adding a new function is easy and adding a new variant forces you to revisit every function, which the checker then helpfully enumerates.
+
+\subsubsection{The \code{else} clause} \code{type-case} also accepts a final \code{[else ...]}, which makes any set of clauses exhaustive. It is convenient but defeats the check: when a variant is added later, the compiler will not point at this \code{type-case}. Interpreters in this course avoid \code{else} in \code{type-case} for that reason.

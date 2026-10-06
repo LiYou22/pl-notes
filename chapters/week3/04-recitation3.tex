@@ -1,0 +1,233 @@
+\section{Recitation 3: Typed Boolean Expressions and Pattern Matching}
+\label{sec:rec3}
+
+Recitation~3 has two halves. Part~A (handout 3a) redoes Recitation~2's interpreter and De Morgan optimizer in \code{plai-typed}, to see what the type checker buys. Part~B (handout 3b) returns to plain Racket and studies \code{match}: literal patterns, wildcards, and taking lists apart.
+
+\subsection{Part A: Boolean Expressions, Typed}
+
+\subsubsection{From four structs to one type} In \Cref{sec:rec2}, a Boolean expression was built from four unrelated structs; ``a bexp'' existed only in our heads, and no field had a type. With \code{define-type}, the four become variants of \emph{one} type, and every field says what it holds:
+\begin{lstlisting}
+(define-type bexp-b
+  [leaf-node-b (b : boolean)]
+  [and-node-b (b1 : bexp-b) (b2 : bexp-b)]
+  [or-node-b (b1 : bexp-b) (b2 : bexp-b)]
+  [not-node-b (b : bexp-b)])
+\end{lstlisting}
+
+\begin{exercise}[Typed evaluator]
+Implement \code{evaluate-bexp-b} with \code{type-case}.
+\end{exercise}
+\begin{solution}
+\code{type-case} plays the role \code{match} played last week:
+\begin{lstlisting}
+(define (evaluate-bexp-b [b : bexp-b]) : boolean
+  (type-case bexp-b b
+    [leaf-node-b (v) v]
+    [and-node-b (b1 b2) (and (evaluate-bexp-b b1) (evaluate-bexp-b b2))]
+    [or-node-b (b1 b2) (or (evaluate-bexp-b b1) (evaluate-bexp-b b2))]
+    [not-node-b (b1) (not (evaluate-bexp-b b1))]))
+
+(test (evaluate-bexp-b (leaf-node-b #t)) #t)
+(test (evaluate-bexp-b (and-node-b (leaf-node-b #t) (leaf-node-b #f))) #f)
+(test (evaluate-bexp-b (not-node-b (or-node-b (leaf-node-b #f) (leaf-node-b #f)))) #t)
+\end{lstlisting}
+\code{test} is \code{plai-typed}'s \code{check-expect}, and \rkt|(print-only-errors true)| at the top of the file makes passing tests silent. This is the same shape as \code{eval} for \tyname{ArithE} in \Cref{sec:calc}.
+\end{solution}
+
+\subsubsection{What do the types buy us?}
+\begin{enumerate}[label=(\alph*)]
+  \item \textbf{Bad leaves are rejected before anything runs.} Last week's \code{bexp-sym-1} was
+\begin{lstlisting}
+(and-node (leaf-node 'x) (leaf-node 'y))
+\end{lstlisting}
+  and \code{evaluate-bexp} happily returned \code{'y}: Racket treats every value except \code{\#f} as true, so \rkt|(and 'x 'y)| is \code{'y}. No error, just an answer of the wrong kind. The typed version
+\begin{lstlisting}
+(evaluate-bexp-b (and-node-b (leaf-node-b 'x) (leaf-node-b 'y)))
+\end{lstlisting}
+  is rejected (\code{typecheck failed: boolean vs.\ symbol}) before anything runs, and the error points at the leaf that is wrong, not at some later function that trips over it.
+  \item \textbf{Missing cases are rejected too.} Last week's \code{evaluate-bexp-m} handled only leaves; it was accepted and failed only when called on something else. The typed version
+\begin{lstlisting}
+(define (evaluate-bexp-b-m [b : bexp-b]) : boolean
+  (type-case bexp-b b
+    [leaf-node-b (v) v]))
+\end{lstlisting}
+  stops the program from starting: \code{you did not include a case for the and-node-b variant}. This is the \code{area-v3}/\code{area-v4} contrast of \Cref{sec:definetype} again.
+\end{enumerate}
+
+\subsubsection{De Morgan, typed} Now the leaves are variables:
+\begin{lstlisting}
+(define-type bexp
+  [leaf-node (s : symbol)]
+  [and-node (b1 : bexp) (b2 : bexp)]
+  [or-node (b1 : bexp) (b2 : bexp)]
+  [not-node (b1 : bexp)])
+\end{lstlisting}
+
+\begin{exercise}[Port \code{demorgan-opt} to \code{plai-typed}]
+Rewrite the optimizer of \Cref{sec:rec2} for the type \tyname{bexp}.
+\end{exercise}
+\begin{solution}
+Last week's \code{match} could name a nested pattern directly, such as \rkt|(not-node (and-node b1 b2))|. A \code{type-case} clause only takes apart the \emph{outermost} constructor, so the \code{not-node} clause needs a second \code{type-case}, on the thing being negated:
+\begin{lstlisting}
+(define (demorgan-opt [b : bexp]) : bexp
+  (type-case bexp b
+    [leaf-node (v) (leaf-node v)]
+    [and-node (b1 b2) (and-node (demorgan-opt b1) (demorgan-opt b2))]
+    [or-node (b1 b2) (or-node (demorgan-opt b1) (demorgan-opt b2))]
+    [not-node (b1)
+      (type-case bexp b1
+        [leaf-node (v) (not-node (leaf-node v))]
+        [and-node (b2 b3) (or-node (demorgan-opt (not-node b2))
+                                   (demorgan-opt (not-node b3)))]
+        [or-node (b2 b3) (and-node (demorgan-opt (not-node b2))
+                                   (demorgan-opt (not-node b3)))]
+        [not-node (b2) (demorgan-opt b2)])]))
+\end{lstlisting}
+The inner clauses are the four nested patterns of last week, one per variant of the negated expression: a negated leaf stays; $\neg(b_2 \land b_3)$ becomes $\neg b_2 \lor \neg b_3$ with both new negations optimized again; $\neg(b_2 \lor b_3)$ symmetrically; and $\neg\neg b_2$ becomes the optimized $b_2$. Both \code{type-case}s are checked for exhaustiveness, so a forgotten shape of negation is now a static error.
+\end{solution}
+
+The tests no longer need \code{syn-equal?}: \code{test} compares \code{define-type} values structurally.
+\begin{lstlisting}
+(define bexp-1 (not-node (or-node (not-node (leaf-node 'P)) (leaf-node 'Q))))
+(define bexp-2 (or-node (not-node (not-node (leaf-node 'P))) (not-node (leaf-node 'Q))))
+(define bexp-3 (or-node (leaf-node 'P) (not-node (leaf-node 'Q))))
+
+(test (demorgan-opt bexp-1) (and-node (leaf-node 'P) (not-node (leaf-node 'Q))))
+(test (demorgan-opt bexp-2) (or-node (leaf-node 'P) (not-node (leaf-node 'Q))))
+(test (demorgan-opt bexp-3) (or-node (leaf-node 'P) (not-node (leaf-node 'Q))))
+\end{lstlisting}
+
+\subsection{Part B: Pattern Matching with \texttt{match}}
+
+So far \code{match} has only taken structs apart. It can also match literal values, ignore parts of the input with wildcards, and take lists apart.
+
+\subsubsection{Matching on values} A pattern can be a literal, which makes \code{match} a compact conditional:
+\begin{lstlisting}
+(define (factorial x)
+  (match x
+    [0 1]
+    [_ (* x (factorial (- x 1)))]))
+
+(define (factorial-if x)
+  (if (= x 0)
+      1
+      (* x (factorial-if (- x 1)))))
+\end{lstlisting}
+\code{\_} is the \emph{wildcard}: it matches anything and binds nothing. Clauses are tried top to bottom, so \code{\_} goes last as the catch-all. With two cases \code{match} and \code{if} are about the same size; with more, nested \code{if}s pile up:
+\begin{lstlisting}
+(define (fibonacci-if x)
+  (if (= x 0)
+      0
+      (if (= x 1)
+          1
+          (+ (fibonacci-if (- x 1)) (fibonacci-if (- x 2))))))
+\end{lstlisting}
+
+\begin{exercise}[Fibonacci with \code{match}]
+Rewrite \code{fibonacci-if} using \code{match}.
+\end{exercise}
+\begin{solution}
+One line per case, and the structure stays flat:
+\begin{lstlisting}
+(define (fibonacci x)
+  (match x
+    [0 0]
+    [1 1]
+    [_ (+ (fibonacci (- x 1)) (fibonacci (- x 2)))]))
+
+(check-expect (fibonacci 1) 1)
+(check-expect (fibonacci 10) 55)
+(check-expect (fibonacci 10) (fibonacci-if 10))
+\end{lstlisting}
+\end{solution}
+
+\begin{exercise}[What is \code{else}?]
+\code{[else ...]} often appears as the last clause of a \code{match}. Predict \rkt|(match 5 [else else])|.
+\end{exercise}
+\begin{solution}
+It is \code{5}. Inside \code{match}, \code{else} is not a keyword but a \emph{pattern variable}, like \code{x}: it matches anything and is bound to what it matched. So here \code{else} is bound to 5 and the clause returns it. That is why \code{[else ...]} happens to work as a catch-all; but it is an accident, and it quietly binds a variable named \code{else} in the body. Use \code{\_} instead.
+\end{solution}
+
+\subsubsection{Destructuring lists} Two attempts at ``the third element of a list'':
+\begin{lstlisting}
+(define (my-third x)
+  (match x
+    [(list a b c d) c]
+    [_ x]))
+
+(define (other-third lst)
+  (match lst
+    [(cons _ (cons _ (cons third _))) third]
+    [_ (error "List too short")]))
+\end{lstlisting}
+
+\begin{exercise}[Predict]
+On which inputs do the two functions behave differently, and why?
+\end{exercise}
+\begin{solution}
+\rkt|(list a b c d)| matches a list of \emph{exactly} four elements. \rkt|(cons _ (cons _ (cons third _)))| matches any list of \emph{at least} three: the last \code{\_} matches whatever rest is left, including \code{'()}.
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+input & \code{my-third} & \code{other-third} \\
+\midrule
+\rkt|(list 2 3)| & \code{'(2 3)} & error \code{"List too short"} \\
+\code{0} & \code{0} & error \\
+\rkt|(list '(2 3) 2 4 5 6 7)| & the whole list & \code{4} \\
+\rkt|(list 1 2 3 4)| & \code{3} & \code{3} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{lstlisting}
+(check-expect (my-third (list 2 3)) (list 2 3))
+(check-expect (my-third 0) 0)
+(check-expect (my-third (list '(2 3) 2 4 5 6 7)) (list '(2 3) 2 4 5 6 7))
+(check-expect (my-third (list 1 2 3 4)) 3)
+
+(check-error (other-third (list 2 3)) "List too short")
+(check-error (other-third 0) "List too short")
+(check-expect (other-third (list '(2 3) 2 4 5 6 7)) 4)
+(check-expect (other-third (list 1 2 3 4)) 3)
+\end{lstlisting}
+\code{my-third} is right only on four-element lists, and when it is wrong it does not fail: the fallback \rkt|[_ x]| hands back its input, so the caller gets a list or a number where it expected the third element. That is the same kind of silent wrong answer as the calculator parser turning \code{'(+ 1 2 3)} into $1 + 2$ (\Cref{sec:calc}). Raising an error, as \code{other-third} does, is better.
+\end{solution}
+
+\begin{exercise}[Fix \code{my-third}]
+Make \code{my-third} return the third element of any list with at least three elements and raise an error otherwise, using a \code{list} pattern. Hint: \code{\_ ...} matches zero or more elements.
+\end{exercise}
+\begin{solution}
+\begin{lstlisting}
+(define (my-third-fixed x)
+  (match x
+    [(list _ _ c _ ...) c]
+    [_ (error "List too short")]))
+
+(check-error (my-third-fixed (list 2 3)) "List too short")
+(check-expect (my-third-fixed (list 1 2 3)) 3)
+(check-expect (my-third-fixed (list '(2 3) 2 4 5 6 7)) 4)
+\end{lstlisting}
+This is equivalent to \code{other-third}'s nested \code{cons} pattern, and easier to read.
+\end{solution}
+
+\subsection{\texttt{match} vs.\ \texttt{type-case}}
+
+The two halves used two tools for taking values apart. Each is strong where the other is weak:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & \code{match} & \code{type-case} \\
+\midrule
+language & \code{racket} & \code{plai-typed} \\
+nested patterns & yes: \rkt|(not-node (and-node b1 b2))| & no: one level; nest another \code{type-case} \\
+literals, wildcards, lists & yes & no \\
+missing case & run-time error, only if reached & rejected before the program runs \\
+\bottomrule
+\end{tabular}
+\end{center}
+\code{match} is more expressive. \code{type-case} is more limited, and in exchange it can check, before anything runs, that every variant is handled. Recitation~4 (\Cref{sec:rec4}) implements a small \code{match} in our own interpreter.
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{More \code{match} patterns} Racket's \code{match} has many more pattern forms~\cite[Section~12]{RacketGuide}: \rkt|(? even? n)| matches when the predicate holds and binds \code{n}; \rkt|(and p1 p2)| and \rkt|(or p1 p2)| combine patterns; \rkt|(list-rest a b rest)| names the tail; \rkt|(app f p)| matches \code{p} against \rkt|(f v)|; and a clause can carry a guard with \code{\#:when}. Repeating a pattern variable, as in \rkt|(list x x)|, requires the two parts to be \code{equal?}.
+
+\subsubsection{Exhaustiveness for richer patterns} Languages with both nested patterns and types, such as OCaml, Haskell, and Rust, get the best of both columns of the table: the compiler checks a set of nested patterns for exhaustiveness and also warns about \emph{redundant} clauses that can never match (like a clause after \code{\_}). The check is done by computing which values are not yet covered, clause by clause, and it is the same algorithm a compiler uses to turn a \code{match} into an efficient decision tree.

@@ -1,0 +1,199 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{plnotes}[2026/10/05 Layout modeled on nm1notes]
+
+% Page and fonts
+\RequirePackage[letterpaper,margin=1in,headheight=26pt]{geometry}
+\RequirePackage[T1]{fontenc}
+\RequirePackage{lmodern}
+\RequirePackage{newtxtext}
+\RequirePackage[varqu,scaled=0.95]{zi4}
+\RequirePackage{textcomp}
+\RequirePackage{microtype}
+\setlength{\emergencystretch}{2em}
+
+% Math
+\RequirePackage{amsmath,amssymb,amsthm,mathtools}
+\RequirePackage{bm}
+
+% Tables, lists, graphics
+\RequirePackage{booktabs}
+\RequirePackage{array}
+\RequirePackage{tabularx}
+\RequirePackage{enumitem}
+\setlist[itemize]{label=\textbullet, itemsep=2pt, topsep=4pt}
+\setlist[enumerate]{itemsep=2pt, topsep=4pt}
+\RequirePackage{graphicx}
+\RequirePackage{caption}
+\captionsetup{font=small}
+\RequirePackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning,fit,backgrounds,
+  shapes.geometric,decorations.pathreplacing,trees}
+
+% Colors and boxes
+\RequirePackage[dvipsnames,table]{xcolor}
+\RequirePackage[most]{tcolorbox}
+\definecolor{accent}{HTML}{1F4E79}
+\definecolor{cmt}{HTML}{6A737D}
+\definecolor{kspace}{HTML}{CFE8FC}
+\definecolor{uspace}{HTML}{DDF3D0}
+\definecolor{tsk}{HTML}{FFF0A8}
+\definecolor{sigc}{HTML}{D32F2F}
+\definecolor{greybg}{HTML}{F0F0F0}
+
+% Code: Racket and plai-typed
+\RequirePackage{listings}
+\lstdefinelanguage{Racket}{
+  morekeywords={define,lambda,cond,else,if,let,let*,letrec,match,match*,
+    case,type-case,define-type,struct,begin,and,or,require,module,
+    test,test/exn,check-expect,check-error,check-equal?,typed-in},
+  sensitive=true,
+  alsoletter={-,?,!,*,/,>,<,=},
+  morecomment=[l]{;},
+  morestring=[b]",
+}
+\lstset{
+  language=Racket,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\bfseries,
+  commentstyle=\itshape\color{cmt},
+  stringstyle=\color{black!75},
+  columns=fullflexible,
+  keepspaces=true,
+  upquote=true,
+  showstringspaces=false,
+  frame=lines,
+  xleftmargin=1em,
+  xrightmargin=1em,
+  aboveskip=8pt,
+  belowskip=8pt,
+}
+% REPL transcripts and traces: no keyword highlighting
+\lstdefinestyle{repl}{language={}, basicstyle=\ttfamily\small, frame=leftline, framerule=1.2pt, rulecolor=\color{accent!50}}
+\newcommand{\rkt}{\lstinline[language=Racket,basicstyle=\ttfamily,keywordstyle={}]}
+
+% Headers and footers
+\RequirePackage{fancyhdr}
+\newcommand{\coursename}{CSCI-GA 2110}
+\newcommand{\footernote}{Programming Languages (CSCI-GA 2110), NYU Courant, Fall 2026. Notes by You Li.}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyhead[L]{\small\coursename\quad\parbox[b]{0.56\textwidth}{\raggedright\nouppercase{\rightmark}}}
+\fancyfoot[L]{\small\footernote}
+\fancyfoot[R]{\small\thepage}
+\renewcommand{\sectionmark}[1]{\markright{\thesection.\ #1}}
+\fancypagestyle{plain}{%
+  \fancyhf{}%
+  \renewcommand{\headrulewidth}{0pt}%
+  \fancyfoot[C]{\small\thepage}}
+
+% Chapter and section headings
+\RequirePackage{titlesec}
+\titleformat{\chapter}[display]
+  {\normalfont\bfseries}
+  {\huge\chaptertitlename\ \thechapter}
+  {20pt}
+  {\Huge\raggedright}
+\titlespacing*{\chapter}{0pt}{60pt}{30pt}
+\titleformat{\section}{\normalfont\Large\bfseries}{\thesection}{1em}{}
+% Each section starts a new page, so a chapter's opening page holds only its title, reading list, and roadmap
+\newcommand{\sectionbreak}{\clearpage}
+\titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}[runin]{\normalfont\normalsize\bfseries}{}{0pt}{}[.]
+
+% Global counter shared by all numbered statements
+\newcounter{stmt}
+\numberwithin{equation}{chapter}
+\numberwithin{figure}{chapter}
+\numberwithin{table}{chapter}
+
+\tcbset{
+  nmbox/.style={
+    enhanced,
+    sharp corners, boxrule=0pt, frame hidden,
+    left=8pt, right=8pt, top=6pt, bottom=6pt,
+    before skip=10pt, after skip=10pt,
+    parbox=false,
+  }
+}
+
+% \NMboxed{env}{Name}{background}{title color}
+\newcommand{\NMboxed}[4]{%
+  \newenvironment{#1}[1][]{%
+    \crefalias{stmt}{#1}\refstepcounter{stmt}%
+    \tcolorbox[nmbox, colback=#3]%
+    \setlength{\parindent}{0pt}%
+    {\color{#4}\bfseries #2 \thestmt\ifx\relax##1\relax\else\ (##1)\fi}\par\smallskip
+  }{\endtcolorbox}%
+}
+\definecolor{defbg}{RGB}{255,237,237}
+\definecolor{deftitle}{RGB}{153,0,0}
+\definecolor{thmbg}{RGB}{237,237,255}
+\definecolor{thmtitle}{RGB}{0,0,255}
+\definecolor{propbg}{RGB}{251,237,242}
+\definecolor{proptitle}{RGB}{128,0,64}
+\definecolor{exbg}{RGB}{240,248,236}
+\definecolor{extitle}{RGB}{40,100,30}
+
+\NMboxed{definition}{Definition}{defbg}{deftitle}
+\NMboxed{theorem}{Theorem}{thmbg}{thmtitle}
+\NMboxed{keypoint}{Key Point}{thmbg}{thmtitle}
+\NMboxed{pitfall}{Pitfall}{propbg}{proptitle}
+\NMboxed{exercise}{Exercise}{exbg}{extitle}
+
+% Unboxed statements: bold run-in heading
+% \NMplain{env}{Name}{body font}
+\newcommand{\NMplain}[3]{%
+  \newenvironment{#1}[1][]{%
+    \par\medskip\crefalias{stmt}{#1}\refstepcounter{stmt}%
+    \noindent{\bfseries #2 \thestmt}\ifx\relax##1\relax\else\ (##1)\fi{\bfseries.}\ #3%
+  }{\par\medskip}%
+}
+\NMplain{example}{Example}{}
+\NMplain{remark}{Remark}{}
+\renewcommand{\qedsymbol}{$\square$}
+
+% Solutions to recitation exercises: unnumbered run-in heading
+\newenvironment{solution}{\par\smallskip\noindent{\bfseries\color{extitle}Solution.}\ }{\par\medskip}
+
+% Cross references
+\RequirePackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\RequirePackage[nameinlink,capitalise,noabbrev]{cleveref}
+\crefname{stmt}{Statement}{Statements}
+\crefname{definition}{Definition}{Definitions}
+\crefname{theorem}{Theorem}{Theorems}
+\crefname{keypoint}{Key Point}{Key Points}
+\crefname{pitfall}{Pitfall}{Pitfalls}
+\crefname{exercise}{Exercise}{Exercises}
+\crefname{example}{Example}{Examples}
+\crefname{remark}{Remark}{Remarks}
+
+% Notation
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\tyname}[1]{\textsf{#1}}
+\newcommand{\FV}{\mathrm{FV}}
+\newcommand{\subst}[3]{#1[#2/#3]}
+\newcommand{\eval}{\Downarrow}
+\newcommand{\step}{\longrightarrow}
+
+% ---------------------------------------------------------------- figures
+\tikzset{
+  every picture/.append style={font=\small},
+  box/.style={draw, rounded corners=2pt, fill=white, minimum height=7mm, inner sep=4pt},
+  arr/.style={-{Stealth[length=2mm]}, thick},
+  lbl/.style={font=\scriptsize, inner sep=1.5pt},
+  % abstract syntax trees
+  ast/.style={draw, rounded corners=2pt, fill=kspace, inner sep=2.5pt, font=\ttfamily\scriptsize},
+  astl/.style={ast, fill=uspace},
+  asth/.style={ast, fill=tsk},
+  % binding arrows from a use to its binder
+  bind/.style={-{Stealth[length=1.8mm]}, semithick, accent, dashed},
+  bad/.style={-{Stealth[length=1.8mm]}, semithick, sigc},
+  % box-and-pointer cons cells
+  cell/.style={draw, minimum width=7mm, minimum height=6mm, inner sep=0pt, font=\ttfamily\small},
+  ptr/.style={-{Stealth[length=1.6mm]}, semithick},
+}
+
+\newlength{\cw}
+\AtBeginDocument{\settowidth{\cw}{\ttfamily\normalsize x}}
+\endinput

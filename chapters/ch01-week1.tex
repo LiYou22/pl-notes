@@ -1,0 +1,25 @@
+\chapter{Week 1: Course Introduction and Racket Basics}
+\label{ch:week1}
+
+Lecture 1: September 8, 2026. Recitation 1: September 11, 2026.
+
+Supplementary reading:
+\begin{itemize}
+  \item \cite{PLAI} Chapter 1 (Introduction).
+  \item \cite{RacketGuide} Chapters 2 (Racket Essentials) and 3.8--3.9 (Pairs and Lists).
+  \item \cite{HtDP} Part I, especially the design recipe (Section 3).
+  \item \cite{SICP} Sections 1.1 and 1.2.1 (the substitution model; linear recursion and iteration).
+\end{itemize}
+
+The first week explains how this course approaches programming languages, by building interpreters for small languages, and teaches enough Racket to start. This chapter covers:
+\begin{itemize}
+  \item \Cref{sec:why}: why study programming languages, why classifying them by paradigm is the wrong place to start, and why the course implements interpreters;
+  \item \Cref{sec:exprrec}: Racket as an expression language, \code{define}, \code{cond}, recursion, and tail recursion with an accumulator;
+  \item \Cref{sec:lists}: pairs, lists, and the two-case shape of list functions;
+  \item \Cref{sec:rec1}: Recitation~1, practicing function composition, specifications, recursion, and list functions on a traffic-light example.
+\end{itemize}
+
+\input{chapters/week1/01-why-study}
+\input{chapters/week1/02-expressions-recursion}
+\input{chapters/week1/03-pairs-lists}
+\input{chapters/week1/04-recitation1}

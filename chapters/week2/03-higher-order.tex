@@ -1,0 +1,148 @@
+\section{Higher-Order Functions}
+\label{sec:hof}
+
+\subsection{Functions Are Values}
+
+A function does not need a name. \code{lambda} builds one on the spot, and it can be called immediately: \rkt|((lambda (x) (* x x)) 4)| is \code{16}. So \code{define} for functions is shorthand, and these two definitions are the same:
+\begin{lstlisting}
+(define (square x)
+  (* x x))
+
+(define square-alt
+  (lambda (x) (* x x)))
+\end{lstlisting}
+Use the short form. Do not nest one form inside the other: \rkt|(define (f x) (lambda ...))| defines a function that \emph{returns} a function, which is a different thing.
+
+Since functions are values, a function can return one:
+\begin{lstlisting}
+(define (make-adder x)
+  (lambda (y) (+ x y)))
+
+(define add2 (make-adder 2))
+\end{lstlisting}
+
+\begin{definition}[Closure]
+A \emph{closure} is a function value together with the bindings of the variables it refers to from the surrounding code.
+\end{definition}
+
+\rkt|(make-adder 2)| returns a function that has not been called yet but already remembers that \code{x} is 2. Then \rkt|(add2 5)| is 7, and \rkt|((make-adder 3) 4)| is 7 as well.
+
+\subsection{\texttt{map} and \texttt{filter}}
+
+Once functions can be arguments, the two most common list patterns become ordinary functions. \code{map} applies a function to every element; the result has the same length as the input.
+\begin{lstlisting}
+(define (my-map f l)
+  (cond
+    [(empty? l) '()]
+    [else (cons (f (first l)) (my-map f (rest l)))]))
+\end{lstlisting}
+So
+\begin{lstlisting}
+(map f (list a b c))                       ; = (list (f a) (f b) (f c))
+(map (lambda (x) (+ 1 x)) (list 1 2 3))    ; = '(2 3 4)
+\end{lstlisting}
+
+\code{filter} keeps the elements that pass a test; the contents are unchanged, only the length shrinks. To drop an element, return the filtered rest without \code{cons}ing it back on:
+\begin{lstlisting}
+(define (my-filter f l)
+  (cond
+    [(empty? l) '()]
+    [else (if (f (first l))
+              (cons (first l) (my-filter f (rest l)))
+              (my-filter f (rest l)))]))
+\end{lstlisting}
+\rkt|(filter odd? (list 1 2 3 4 5))| is \code{'(1 3 5)}.
+
+\begin{keypoint}[Three shapes of list code]
+\code{map}: list to list, same length. \code{filter}: list to list, shorter. \code{fold}: list to a single value. Most list code is a combination of these three.
+\end{keypoint}
+
+\subsection{Folds}
+
+\code{map} and \code{filter} each fix what happens at every step. A \emph{fold} takes the step as an argument: a two-argument \code{combine}, a \code{base} value for the empty list, and the list. It walks the list once and collapses it into one value. There are two folds, and they differ in which way the parentheses group (\Cref{fig:folds}):
+\begin{align*}
+\code{(my-foldl - 0 '(1 2 3))} &= ((0 - 1) - 2) - 3 = -6, \\
+\code{(my-foldr - 0 '(1 2 3))} &= 1 - (2 - (3 - 0)) = 2.
+\end{align*}
+With an associative and commutative \code{combine} such as \code{+}, \code{*}, or \code{max}, the two agree, which is why the difference is easy to miss until it bites.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[level distance=9mm, sibling distance=9mm, every node/.style={ast}]
+  \node[asth] {-}
+    child {node[asth] {-}
+      child {node[asth] {-} child {node[astl] {0}} child {node {1}}}
+      child {node {2}}}
+    child {node {3}};
+  \node[draw=none, fill=none, font=\small] at (0,-4.0) {\code{foldl}: $((0-1)-2)-3$};
+\end{tikzpicture}
+\hspace{2cm}
+\begin{tikzpicture}[level distance=9mm, sibling distance=9mm, every node/.style={ast}]
+  \node[asth] {-}
+    child {node {1}}
+    child {node[asth] {-}
+      child {node {2}}
+      child {node[asth] {-} child {node {3}} child {node[astl] {0}}}};
+  \node[draw=none, fill=none, font=\small] at (0,-4.0) {\code{foldr}: $1-(2-(3-0))$};
+\end{tikzpicture}
+\caption{The two folds of \code{-} over \code{'(1 2 3)} with base 0 (green). \code{foldl} leans left, starting from the base; \code{foldr} leans right, ending at the base.}
+\label{fig:folds}
+\end{figure}
+
+\subsubsection{\code{foldl} combines on the way down} In \code{my-foldl}, \code{base} doubles as the running accumulator. Each step folds one more element into it and calls itself, and that call is a tail call, so this is a loop in constant stack space:
+\begin{lstlisting}
+(define (my-foldl combine base l)
+  (cond
+    [(empty? l) base]
+    [else (my-foldl combine (combine base (first l)) (rest l))]))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+(my-foldl + 0 '(1 2 3 4 5))
+---> (my-foldl + 1 '(2 3 4 5))
+---> (my-foldl + (+ 1 2) '(3 4 5))
+---> (my-foldl + (+ 3 3) '(4 5))
+---> (my-foldl + (+ 6 4) '(5))
+---> (my-foldl + 15 empty)
+---> 15
+\end{lstlisting}
+Nothing is pending; at every step the accumulator is a value and the list is shorter.
+
+\subsubsection{\code{foldr} combines on the way back up} In \code{my-foldr}, \code{combine} wraps the recursive call. No arithmetic can happen until the recursion reaches \code{'()} and the base value comes back:
+\begin{lstlisting}
+(define (my-foldr combine base l)
+  (cond
+    [(empty? l) base]
+    [else (combine (first l) (my-foldr combine base (rest l)))]))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+(my-foldr + 0 '(1 2 3 4 5))
+---> (+ 1 (my-foldr + 0 '(2 3 4 5)))
+---> (+ 1 (+ 2 (my-foldr + 0 '(3 4 5))))
+---> (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (my-foldr + 0 empty))))))
+---> (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 0)))))
+---> 15
+\end{lstlisting}
+That growing pile of pending additions \emph{is} the stack: it is the concrete reason \code{foldr} uses $O(n)$ space and \code{foldl} $O(1)$.
+
+\begin{keypoint}[\code{foldr} rebuilds structure]
+\rkt|(my-foldr cons '() l)| copies \code{l}, because \code{foldr} replaces each \code{cons} of the list by \code{combine} and the final \code{'()} by \code{base}. Hence \code{map} and \code{filter} are both folds in disguise:
+\begin{lstlisting}
+(define (map-as-fold f l)
+  (my-foldr (lambda (x acc) (cons (f x) acc)) '() l))
+
+(define (filter-as-fold f l)
+  (my-foldr (lambda (x acc) (if (f x) (cons x acc) acc)) '() l))
+\end{lstlisting}
+\end{keypoint}
+
+\begin{pitfall}[Racket's \code{foldl} argument order]
+The \code{combine} of \code{my-foldl} takes \code{(acc elem)}. Racket's built-in \code{foldl} calls \code{(combine elem acc)}, element first, the opposite order. So \rkt|(foldl - 0 '(1 2 3))| in Racket is $3-(2-(1-0)) = 2$, not $-6$. Check the order before reusing a \code{combine}.
+\end{pitfall}
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{Currying} \code{make-adder} is a \emph{curried} version of \code{+}: instead of taking two arguments at once it takes one and returns a function waiting for the other. Any two-argument function can be curried this way. \Cref{sec:fntypes} shows the difference in the types, and Recitation~4 uses a curried helper so it can be passed to \code{map} (\Cref{sec:rec4}).
+
+\subsubsection{The universality of \code{foldr}} Every structurally recursive function on lists that only uses the head and the result for the tail can be written as a \code{foldr}: \code{length}, \code{append}, \code{map}, \code{filter}, \code{reverse} (inefficiently), and more. In typed functional languages this is the starting point for program calculation: laws such as $\code{foldr}\ f\ b \circ \code{map}\ g = \code{foldr}\ (\lambda x\,a.\ f\,(g\,x)\,a)\ b$ let a compiler fuse two traversals into one.
+
+\subsubsection{Closures need the environment} How does \code{add2} remember \code{x}? An implementation stores, alongside the code of the \code{lambda}, the bindings of its free variables at the time the \code{lambda} was evaluated. Implementing this is a central topic of the interpreter part of the course: \Cref{ch:week4} first implements functions by substitution, and \cite[Chapters~6--7]{PLAI} replace substitution by environments and closures.

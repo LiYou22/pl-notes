@@ -1,0 +1,166 @@
+\section{Functions: \texttt{lambda} and Application}
+\label{sec:lambda}
+
+\subsection{Syntax}
+
+The last part of the lecture adds functions:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+syntax & meaning & abstract syntax \\
+\midrule
+\code{(lambda x e)} & a function with parameter \code{x} and body \code{e} & \code{lambdaC} \\
+\code{(e1 e2)} & call the function \code{e1} on the argument \code{e2} & \code{appC} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{lstlisting}
+(define-type ArithE
+  [numC (n : number)]
+  [idC (x : symbol)]
+  [plusC (e1 : ArithE) (e2 : ArithE)]
+  [timesC (e1 : ArithE) (e2 : ArithE)]
+  [letC (x : symbol) (e1 : ArithE) (e2 : ArithE)]
+  [lambdaC (x : symbol) (e : ArithE)]
+  [appC (e1 : ArithE) (e2 : ArithE)])
+\end{lstlisting}
+\code{lambdaC} \emph{defines} a function and \code{appC} \emph{uses} one, much as \code{letC} introduces a name and \code{idC} uses it. Functions take one argument; several arguments can be simulated by currying (\Cref{sec:hof}).
+
+\subsubsection{Parsing} Any list whose head is not \code{+}, \code{*}, \code{let}, or \code{lambda} is an application:
+\begin{lstlisting}
+(define (parse (s : s-expression)) : ArithE
+  (cond
+    [(s-exp-number? s) (numC (s-exp->number s))]
+    [(s-exp-symbol? s) (idC (s-exp->symbol s))]
+    [(s-exp-list? s)
+     (let [(l (s-exp->list s))]
+       (if (s-exp-symbol? (first l))
+           (case (s-exp->symbol (first l))
+             [(+) (plusC (parse (second l)) (parse (third l)))]
+             [(*) (timesC (parse (second l)) (parse (third l)))]
+             [(let) (letC (s-exp->symbol (second l)) (parse (third l)) (parse (fourth l)))]
+             [(lambda) (lambdaC (s-exp->symbol (second l)) (parse (third l)))]
+             [else (appC (parse (first l)) (parse (second l)))])
+           ;; head is not a symbol, e.g. ((lambda x (+ x 1)) 5)
+           (appC (parse (first l)) (parse (second l)))))]))
+\end{lstlisting}
+\begin{lstlisting}
+(parse '((lambda x (+ x 1)) 5))
+;; = (appC (lambdaC 'x (plusC (idC 'x) (numC 1))) (numC 5))
+(parse '(f 5))
+;; = (appC (idC 'f) (numC 5))
+\end{lstlisting}
+The outer \code{if} matters for calls whose head is itself a list, like \code{((lambda x (+ x 1)) 5)}: calling \code{s-exp->symbol} on it would fail with \code{s-exp->symbol: not a symbol}.
+
+\begin{remark}
+With an application fallback, \code{'(- 1 2)} no longer fails to parse. The \code{else} branch reads it as a call of a function named \code{-}, giving \rkt|(appC (idC '-) (numC 1))| and silently dropping the \code{2}. Before \code{lambda} was added, it was \code{case: no matching clause}.
+\end{remark}
+
+\subsection{\texttt{lambda} in Substitution}
+
+A \code{lambda} binds its parameter in its body, exactly as \code{let} binds \code{x} in \code{e2}. So the \code{lambdaC} case of each substitution function is its \code{letC} case without an \code{e1}: stop at shadowing, and in \code{subst-lazy-v2} rename with \code{gensym} first. The application case just recurses.
+\begin{lstlisting}
+;; in subst-eager (subst-lazy is the same with subst-lazy)
+[lambdaC (y e)
+         (if (equal? x y) (lambdaC y e) (lambdaC y (subst-eager v x e)))]
+[appC (e1 e2) (appC (subst-eager v x e1) (subst-eager v x e2))]
+
+;; in subst-lazy-v2
+[lambdaC (y e)
+         (if (equal? x y)
+             (lambdaC y e)
+             (let [(z (gensym))]
+               (lambdaC z (subst-lazy-v2 v x (subst-lazy (idC z) y e)))))]
+[appC (e1 e2) (appC (subst-lazy-v2 v x e1) (subst-lazy-v2 v x e2))]
+\end{lstlisting}
+
+\begin{pitfall}[The pattern variable shadows the argument]
+In \rkt|[lambdaC (y e) ...]|, the pattern variable \code{e} (the body) shadows \code{subst}'s own argument \code{e} (the whole \code{lambda}). So the shadowing branch must rebuild \rkt|(lambdaC y e)|; returning plain \code{e} would drop the \code{lambda} and return only its body. Shadowing bites the interpreter's author too.
+\end{pitfall}
+
+\subsection{A New Result Type}
+
+A program can now produce a function, for example \code{(lambda x (+ x 1))} or \code{(let f (lambda x x) f)}, and a function is not a number. So evaluation returns a \tyname{Value}, which is either:
+\begin{lstlisting}
+(define-type Value
+  [numV (n : number)]
+  [funV (x : symbol) (e : ArithE)])
+\end{lstlisting}
+\code{+} and \code{*} only make sense on numbers, so they unwrap \code{numV} first and complain about anything else:
+\begin{lstlisting}
+(define (num+ (v1 : Value) (v2 : Value)) : Value
+  (if (and (numV? v1) (numV? v2))
+      (numV (+ (numV-n v1) (numV-n v2)))
+      (error 'eval "not a number")))
+
+(define (num* (v1 : Value) (v2 : Value)) : Value
+  (if (and (numV? v1) (numV? v2))
+      (numV (* (numV-n v1) (numV-n v2)))
+      (error 'eval "not a number")))
+\end{lstlisting}
+This is the first \emph{dynamic} type error in our language: whether \code{(+ e1 e2)} is meaningful depends on what \code{e1} and \code{e2} evaluate to, which the interpreter only learns at run time.
+
+\subsection{\texttt{eval-lazy-v2}}
+
+\begin{lstlisting}
+(define (eval-lazy-v2 (e : ArithE)) : Value
+  (type-case ArithE e
+    [numC (n) (numV n)]
+    [idC (x) (error 'eval "unbound variable")]
+    [plusC (e1 e2) (num+ (eval-lazy-v2 e1) (eval-lazy-v2 e2))]
+    [timesC (e1 e2) (num* (eval-lazy-v2 e1) (eval-lazy-v2 e2))]
+    [letC (y e1 e2) (eval-lazy-v2 (subst-lazy-v2 e1 y e2))]
+    [lambdaC (x e) (funV x e)]
+    [appC (e1 e2)
+          (type-case Value (eval-lazy-v2 e1)
+            [funV (x e) (eval-lazy-v2 (subst-lazy-v2 e2 x e))]
+            [numV (n) (error 'eval "not a function")])]))
+\end{lstlisting}
+\begin{itemize}
+  \item \textbf{\code{lambdaC}}: a \code{lambda} is already a value. There is nothing to compute until it is called.
+  \item \textbf{\code{appC}}: evaluate \code{e1}; it must be a function \rkt|(funV x e)|. Then call it the way \code{let} works: substitute the argument \code{e2} for \code{x} in the body \code{e}, and evaluate the result. \code{e2} is substituted unevaluated, because this is the lazy version.
+\end{itemize}
+\begin{lstlisting}[style=repl]
+((lambda x (+ x 1)) 5)
+---> (+ 5 1)             subst 5 for x in the body
+---> 6
+\end{lstlisting}
+
+\begin{keypoint}[\code{let} is application]
+\code{((lambda x e) e2)} means the same as \code{(let x e2 e)}. What \code{lambda} adds is that the function is a \emph{value}: it can be named with \code{let}, passed as an argument, and returned as a result.
+\end{keypoint}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+program & result \\
+\midrule
+\code{(let f (lambda x (* x 2)) (f 5))} & \code{(numV 10)} \\
+\code{((lambda f (f 3)) (lambda x (+ x 1)))} & \code{(numV 4)}: a function as argument \\
+\code{(((lambda x (lambda y (+ x y))) 1) 2)} & \code{(numV 3)}: a function as result \\
+\code{((lambda x 5) y)} & \code{(numV 5)}: the unused argument is never evaluated \\
+\code{(5 3)} & \code{not a function} \\
+\code{(+ (lambda x x) 1)} & \code{not a number} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Capture, Again}
+
+With functions, capture-avoiding substitution matters even more. A function can return a function, so a free name can end up under another \code{lambda}:
+\begin{lstlisting}[style=repl]
+(((lambda x (lambda y (+ x y))) y) 2)
+subst-lazy:     (lambda y (+ y y)),  then 2 ---> 4          captured!
+subst-lazy-v2:  (lambda g (+ y g)),  then 2 ---> (+ y 2) ---> unbound variable
+\end{lstlisting}
+\code{eval-eager} and \code{eval-lazy} still return a \code{number}, and \code{subst-eager} can substitute only numbers, so their \code{lambdaC} and \code{appC} cases remain errors (\code{"TODO: lambda"}) for now.
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{The lambda calculus} Strip the language down to \code{idC}, \code{lambdaC}, and \code{appC} and you get Church's \emph{lambda calculus}, whose only computation step is $\beta$-reduction, $(\lambda x.\,e)\ e_2 \step \subst{e}{e_2}{x}$, exactly the \code{appC} case above. It is Turing-complete: numbers, Booleans, pairs, and recursion can all be encoded as functions. For instance, the Church numeral $n$ is $\lambda f.\,\lambda x.\,f(f(\cdots f(x)))$ with $n$ applications of $f$. Capture-avoiding substitution was invented for it; \cite[Chapter~5]{TAPL} develops it in detail.
+
+\subsubsection{Why \code{funV} stores no environment} In \code{eval-lazy-v2}, a function value is just its parameter and body. That is enough only because substitution has already replaced every free variable of the body by the time the \code{lambda} is evaluated, as in \rkt|(((lambda x (lambda y (+ x y))) 1) 2)|, where \code{x} is replaced by \code{1} before the inner \code{lambda} becomes a value. An environment-based interpreter cannot do this: it must store the environment with the function, as a \emph{closure} (\Cref{sec:hof}). Forgetting to do so gives dynamic scope~\cite[Chapter~6]{PLAI}.
+
+\subsubsection{When can capture actually happen?} Both evaluators substitute from the outside in: an outer \code{let} or call is processed before anything inside it. So if the whole program is closed, every expression that gets substituted is closed as well, and there is nothing to capture. Capture therefore shows up only in programs with free variables, exactly the lecture's examples, where the right answer is ``unbound variable'' but a capturing substitution produces a number. It becomes unavoidable in settings that substitute \emph{open} terms: reducing inside function bodies (normal-order reduction in the lambda calculus, or a compiler inlining and simplifying a function body), and macro expansion. That is why every serious implementation of substitution is capture-avoiding.
+
+\subsubsection{Call-by-value application} An eager \code{appC} evaluates the argument first and substitutes the resulting value into the body. Under call-by-value, \code{((lambda x 5) y)} is an unbound-variable error instead of 5, the same eager/lazy difference as for \code{let} in \Cref{sec:lazy}. Racket, like most languages, applies functions this way.

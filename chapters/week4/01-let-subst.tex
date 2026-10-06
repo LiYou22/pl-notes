@@ -1,0 +1,158 @@
+\section{Names: \texttt{let} and Substitution}
+\label{sec:letsubst}
+
+\subsection{The Plan}
+
+At the end of \Cref{ch:week3} the calculator had \code{numC}, \code{plusC}, and \code{timesC}. The first new form is \code{(let x e1 e2)}: compute \code{e1}, replace every \code{x} in \code{e2} with that value, then compute \code{e2}.
+\begin{lstlisting}[style=repl]
+(let x 5 (+ x x))
+---> (+ 5 5)                 replace every x in the body with 5
+---> 10
+
+(let x (+ 1 5) (+ x x))
+---> (let x 6 (+ x x))       e1 is evaluated first
+---> (+ 6 6)
+---> 12
+\end{lstlisting}
+
+\subsection{Two New Variants}
+
+\begin{lstlisting}
+(define-type ArithE
+  [numC (n : number)]
+  [idC (x : symbol)]
+  [plusC (e1 : ArithE) (e2 : ArithE)]
+  [timesC (e1 : ArithE) (e2 : ArithE)]
+  [letC (x : symbol) (e1 : ArithE) (e2 : ArithE)])
+\end{lstlisting}
+(\Cref{sec:lambda} adds two more variants for functions; from then on every function on \tyname{ArithE} has a case for them.)
+
+\subsubsection{What is \code{idC} for?} An \code{idC} is a \emph{use} of a name, such as the \code{x} in \code{(+ x 1)}. The operands of \code{plusC} must be \tyname{ArithE}s, so a bare symbol \code{'x} cannot go there; \code{idC} wraps the symbol so a name can sit in the tree until substitution replaces it. It does for symbols what \code{numC} does for numbers.
+
+A name appears in two roles, and only one of them is an \code{idC}:
+\begin{lstlisting}
+;; (let x 5 (+ x 1))
+(letC 'x (numC 5) (plusC (idC 'x) (numC 1)))
+;;    ^ binding: a plain symbol    ^ use: an idC
+\end{lstlisting}
+The name right after \code{let} is being \emph{bound}. It is a plain symbol field of \code{letC}, because it is never evaluated or replaced; it only tells substitution which name to look for. Symbols like \code{+} and \code{let} never become \code{idC}s either: \code{parse} consumes them to decide which variant to build. Writing \rkt|(plusC 'x (numC 1))| is a type error, since \code{'x} is a \tyname{symbol} and not an \tyname{ArithE}.
+
+\subsubsection{Parsing} A lone symbol becomes an \code{idC}. In \code{(let x e1 e2)} the \code{x} is taken as a plain symbol, while \code{e1} and \code{e2} are parsed recursively:
+\begin{lstlisting}
+(define (parse (s : s-expression)) : ArithE
+  (cond
+    [(s-exp-number? s) (numC (s-exp->number s))]
+    [(s-exp-symbol? s) (idC (s-exp->symbol s))]
+    [(s-exp-list? s)
+     (let [(l (s-exp->list s))]
+       (case (s-exp->symbol (first l))
+         [(+) (plusC (parse (second l)) (parse (third l)))]
+         [(*) (timesC (parse (second l)) (parse (third l)))]
+         [(let) (letC (s-exp->symbol (second l)) (parse (third l)) (parse (fourth l)))]))]))
+\end{lstlisting}
+As in lecture~3, there is no error checking: \rkt|(parse '(let x 1))| fails inside \code{fourth} with \code{list contains too few elements}.
+
+\subsection{Eager Substitution}
+
+\rkt|(subst-eager v x e)| replaces every \code{x} in \code{e} with the number \code{v}. Most variants just recurse into their children; the interesting cases are the ones that mention names.
+\begin{lstlisting}
+(define (subst-eager (v : number) (x : symbol) (e : ArithE)) : ArithE
+  (type-case ArithE e
+    [numC (n) (numC n)]
+    [idC (y) (if (equal? x y) (numC v) (idC y))]
+    [plusC (e1 e2) (plusC (subst-eager v x e1) (subst-eager v x e2))]
+    [timesC (e1 e2) (timesC (subst-eager v x e1) (subst-eager v x e2))]
+    [letC (y e1 e2)
+          (letC y
+                (subst-eager v x e1)
+                (if (equal? x y) e2 (subst-eager v x e2)))]))
+\end{lstlisting}
+
+\subsubsection{Why \code{(numC v)} and \code{(idC y)}?} \code{subst-eager} returns an \tyname{ArithE} tree, but \code{v} is a number, so it is wrapped as \rkt|(numC v)| to go back into the tree. An \code{idC} for a different name is left alone: \rkt|(idC y)| rebuilds the same node, which is equivalent to returning \code{e}.
+\begin{lstlisting}
+(subst-eager 5 'x (plusC (idC 'x) (idC 'y)))   ; = (plusC (numC 5) (idC 'y))
+\end{lstlisting}
+
+\subsection{Shadowing}
+
+What is \code{(let x 5 (let x 6 (+ x x)))}: 12 or 10? The answer is 12. The inner \code{let} binds its own \code{x}, so inside its body \code{x} means 6: the inner \code{x} \emph{shadows} the outer one (\Cref{fig:shadow}).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[tok/.style={inner sep=0pt, font=\ttfamily\normalsize, anchor=base west}]
+  \node[tok] at (0,0) {(let x 5 (let x 6 (+ x x)))};
+  \node[tok] (x1) at (5\cw,0) {\phantom{x}};
+  \node[tok] (x2) at (14\cw,0) {\phantom{x}};
+  \node[tok] (u1) at (21\cw,0) {\phantom{x}};
+  \node[tok] (u2) at (23\cw,0) {\phantom{x}};
+  \draw[bind] (u1.south) to[out=-110, in=-70] (x2.south);
+  \draw[bind] (u2.south) to[out=-110, in=-70] (x2.south);
+  \node[lbl, below=8mm of u1, text=accent] {both uses refer to the inner binder};
+  \node[lbl, above=1mm of x1] {outer};
+  \node[lbl, above=1mm of x2] {inner};
+\end{tikzpicture}
+\caption{Each use of a name refers to the nearest enclosing binder of that name.}
+\label{fig:shadow}
+\end{figure}
+
+That is the \rkt|(equal? x y)| check in the \code{letC} case: when an inner \code{let} binds the same name we are substituting for, substitution stops at its body.
+\begin{lstlisting}[style=repl]
+(let x 5 (let x 6 (+ x x)))
+---> (let x 6 (+ x x))       the outer subst leaves the inner body alone
+---> (+ 6 6)
+---> 12
+\end{lstlisting}
+Substituting blindly would give \code{(let x 6 (+ 5 5))}, which is 10. The inner \code{e1} is still substituted, because it sits \emph{outside} the inner binding; the inner \code{x} exists only in the inner body:
+\begin{lstlisting}[style=repl]
+(let x 1 (let x (+ x 1) x))
+---> (let x (+ 1 1) x)       the x in e1 is the outer x
+---> 2
+\end{lstlisting}
+
+\subsection{\texttt{eval-eager}}
+
+\begin{lstlisting}
+(define (eval-eager (e : ArithE)) : number
+  (type-case ArithE e
+    [numC (n) n]
+    [idC (x) (error 'eval "unbound variable")]
+    [plusC (e1 e2) (+ (eval-eager e1) (eval-eager e2))]
+    [timesC (e1 e2) (* (eval-eager e1) (eval-eager e2))]
+    [letC (y e1 e2) (eval-eager (subst-eager (eval-eager e1) y e2))]))
+\end{lstlisting}
+The \code{letC} line is the plan written out: evaluate \code{e1}, substitute the resulting number for \code{y} in \code{e2}, and evaluate the result. \code{eval-eager} never meets an \code{idC} that some \code{let} bound, because the enclosing \code{letC} has already substituted it away. An \code{idC} that survives was never bound, as in \code{(+ x 1)}, so it is an error.
+\begin{lstlisting}[style=repl]
+(let x 5 (let y (+ x 1) (* x y)))
+letC x: eval e1 = 5, subst 5 for x in the body
+---> (let y (+ 5 1) (* 5 y))
+letC y: eval e1 = 6, subst 6 for y in the body
+---> (* 5 6)
+---> 30
+\end{lstlisting}
+Each \code{let} removes the \code{idC}s for its own name; once every \code{let} has been processed, none is left.
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{Free and bound variables, formally} The free variables of an expression are defined by structural recursion, with \code{let} as the only binder:
+\begin{align*}
+\FV(n) &= \emptyset, & \FV(x) &= \{x\}, \\
+\FV(e_1 + e_2) = \FV(e_1 \times e_2) &= \FV(e_1) \cup \FV(e_2), & \FV(\code{let}\ x\ e_1\ e_2) &= \FV(e_1) \cup (\FV(e_2) \setminus \{x\}).
+\end{align*}
+A closed expression ($\FV(e) = \emptyset$) never raises ``unbound variable''. Substitution $\subst{e}{v}{x}$ follows the same shape, and its \code{let} case is exactly the code above:
+\[
+\subst{(\code{let}\ y\ e_1\ e_2)}{v}{x} =
+\begin{cases}
+\code{let}\ y\ \subst{e_1}{v}{x}\ e_2 & \text{if } y = x,\\
+\code{let}\ y\ \subst{e_1}{v}{x}\ \subst{e_2}{v}{x} & \text{if } y \neq x.
+\end{cases}
+\]
+
+\subsubsection{Big-step semantics} The interpreter can be summarized by inference rules for a relation $e \eval n$, ``$e$ evaluates to $n$''. Each rule corresponds to one clause of \code{eval-eager}:
+\[
+\frac{}{n \eval n}
+\qquad
+\frac{e_1 \eval n_1 \quad e_2 \eval n_2}{e_1 + e_2 \eval n_1 + n_2}
+\qquad
+\frac{e_1 \eval n_1 \quad \subst{e_2}{n_1}{x} \eval n}{\code{let}\ x\ e_1\ e_2 \eval n}
+\]
+There is no rule for a variable, which is why a free variable is an error: no derivation exists. Writing the rules side by side with the code is the mathematical approach to semantics mentioned in \Cref{sec:why}; for this language the two say exactly the same thing.

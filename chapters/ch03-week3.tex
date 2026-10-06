@@ -1,0 +1,24 @@
+\chapter{Week 3: Types and a First Interpreter}
+\label{ch:week3}
+
+Lecture 3: September 22, 2026. Recitation 3: September 25, 2026.
+
+Supplementary reading:
+\begin{itemize}
+  \item \cite{PLAI} Chapters 2 (Everything (We Will Say) About Parsing) and 3 (A First Look at Interpretation).
+  \item \cite{PLAI} Chapter 15 (Checking Program Invariants Statically: Types), first sections, and the \code{plai-typed} documentation.
+  \item \cite{TAPL} Chapter 1 (what type systems are for), optional.
+\end{itemize}
+
+From this week on, code is written in \code{\#lang plai-typed}, the language of the textbook: Racket with a type checker that reads the whole program before anything runs. Lecture~3 introduces its types, defines new types with \code{define-type}, and uses them to write the first interpreter of the course, a calculator. Recitation~3 redoes Recitation~2 with types and then studies Racket's \code{match} in more depth. This chapter covers:
+\begin{itemize}
+  \item \Cref{sec:types}: types, type inference and annotations, function types, homogeneous lists, pairs, and polymorphism;
+  \item \Cref{sec:definetype}: \code{define-type}, \code{type-case}, and exhaustiveness checking;
+  \item \Cref{sec:calc}: quote and s-expressions, concrete vs.\ abstract syntax, and the calculator's parser and interpreter;
+  \item \Cref{sec:rec3}: Recitation~3, typed Boolean expressions and pattern matching with \code{match}.
+\end{itemize}
+
+\input{chapters/week3/01-types}
+\input{chapters/week3/02-define-type}
+\input{chapters/week3/03-calculator}
+\input{chapters/week3/04-recitation3}

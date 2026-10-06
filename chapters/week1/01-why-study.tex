@@ -1,0 +1,85 @@
+\section{Studying Programming Languages}
+\label{sec:why}
+
+\subsection{Classification Is Not Understanding}
+
+The obvious way to organize the subject is by classification. Languages are sorted by \emph{paradigm} (functional, imperative, object-oriented), by \emph{abstraction} (high-level or low-level), by \emph{representation} (text or graphical), and so on. A common course design follows from it: survey the categories, pick three or four languages from different ones, learn their basics, and write programs that highlight each one's features. That is not a bad idea, and you would learn a lot, but it is not the approach of this course.
+
+The lecture makes the point with biological taxonomy. ``Ape'' sounds like a natural category: large, tailless primates such as the orangutan, the gorilla, and the chimpanzee. But when species are grouped by common descent, the group that contains all three also contains humans, and chimpanzees are closer to humans than to orangutans (\Cref{fig:clade}). A classification by surface features does not match the underlying structure. Sensible classification has to come \emph{after} understanding the principles.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm, line width=0.9pt]
+  \coordinate (r) at (0,0);
+  \coordinate (a) at (0.8,0.8);
+  \coordinate (b) at (1.6,1.6);
+  \draw (r) -- (-2.6,2.6) node[above, font=\small] {Orangutan};
+  \draw (r) -- (a) -- (b);
+  \draw (a) -- (-0.8,2.4) -- (-0.8,2.6) node[above, font=\small] {Gorilla};
+  \draw (b) -- (0.8,2.4) -- (0.8,2.6) node[above, font=\small] {Human};
+  \draw (b) -- (2.4,2.4) -- (2.4,2.6) node[above, font=\small] {Chimpanzee};
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror}] (-3.2,-0.3) -- (3.2,-0.3)
+    node[midway, below=5pt, lbl] {the great apes: a group defined by descent includes humans};
+\end{tikzpicture}
+\caption{Grouping by common descent. Humans sit inside the great apes, not beside them (after slide~7).}
+\label{fig:clade}
+\end{figure}
+
+The course's claim is that the same \emph{building blocks} appear in many programming languages: functions, names and scope, data structures, state, types, control. It is better to understand these building blocks directly than to memorize which languages have which features.
+
+\begin{keypoint}[Two false dichotomies]
+\begin{itemize}
+  \item \emph{``Functional'' vs.\ ``imperative'' languages.} There is no dichotomy. A single language can have functional features, such as first-class functions, and imperative ones, such as mutable state. Racket, OCaml, Python, and JavaScript all have both.
+  \item \emph{``Interpreted'' vs.\ ``compiled'' languages.} Interpreting and compiling describe an \emph{implementation}, not a language. Any language can have both interpreters and compilers, so neither is a property of the language.
+\end{itemize}
+\end{keypoint}
+
+\subsection{Studying by Implementing}
+
+To study the building blocks, we want to be precise and formal. One way is mathematical: give a theory of what programs mean and how they behave (formal semantics). This course takes a second way: it \emph{implements} programming languages. To implement a feature you must decide exactly what it does in every case, so writing the implementation forces the precision that a mathematical definition would.
+
+There are two strategies for implementing a language (\Cref{fig:implstrat}):
+\begin{itemize}
+  \item A \emph{compiler} translates a program in one language into another language that can be executed.
+  \item An \emph{interpreter} is a program that takes a program as input and directly executes it.
+\end{itemize}
+This course builds interpreters. Compilers are the subject of Compiler Construction (CSCI-GA 2130).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=6mm and 9mm]
+  \node[box, fill=uspace] (p1) {source program};
+  \node[box, fill=kspace, right=of p1] (c) {compiler};
+  \node[box, fill=uspace, right=of c] (t) {target program};
+  \node[box, fill=greybg, right=of t] (m) {machine};
+  \draw[arr] (p1) -- (c); \draw[arr] (c) -- (t); \draw[arr] (t) -- (m);
+  \node[lbl, above=1mm of c] {translate, once};
+  \node[lbl, above=1mm of m] {run};
+
+  \node[box, fill=uspace, below=12mm of p1] (p2) {source program};
+  \node[box, fill=kspace, right=of p2] (i) {interpreter};
+  \node[box, fill=tsk, right=of i] (v) {answer};
+  \draw[arr] (p2) -- (i); \draw[arr] (i) -- (v);
+  \node[box, fill=greybg, below=4mm of i, font=\small] (in) {input};
+  \draw[arr] (in) -- (i);
+  \node[lbl, above=1mm of i] {execute directly};
+\end{tikzpicture}
+\caption{The two implementation strategies. This course writes interpreters.}
+\label{fig:implstrat}
+\end{figure}
+
+\subsection{Course Logistics}
+
+\begin{itemize}
+  \item \textbf{Staff.} Instructor: Joseph Tassarotti. Recitation leaders: Seong-Heon Jung and Vishnu Satish.
+  \item \textbf{Textbook.} Krishnamurthi, \emph{Programming Languages: Application and Interpretation}, 2nd edition~\cite{PLAI}, free online and linked from the syllabus.
+  \item \textbf{Language.} The interpreters are written in Racket, for two reasons: Racket has many of the core features we want to study, so writing it is practice in them; and Racket was designed for implementing programming languages.
+  \item \textbf{Grading.} Final exam 50\%, homework 50\%.
+  \item \textbf{Homework.} Five assignments of two to three weeks each, done individually. Assignment~1 is a Racket warm-up, pure programming, auto-graded. Assignments 2--5 combine programming with conceptual questions. Up to 72 hours of lateness are allowed in total across all assignments; see the syllabus for details.
+\end{itemize}
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{Definitional interpreters} The idea of explaining a language by writing an interpreter for it is old. Reynolds~\cite{Reynolds} called such programs \emph{definitional interpreters}: the interpreter, written in a language we already understand, \emph{is} the definition of the new language. The method has a catch Reynolds also pointed out: if the defining language has a feature (say, eager evaluation or higher-order functions), the defined language can silently inherit it. Much of this course is about \emph{not} inheriting features by accident. In \Cref{sec:rec2}, for example, our language's \code{and} is implemented by Racket's \code{and}, so it short-circuits exactly when Racket's does.
+
+\subsubsection{Language vs.\ implementation, in practice} Python is usually run by CPython, which compiles source to bytecode and then interprets the bytecode; PyPy runs the same language with a just-in-time compiler. JavaScript engines interpret first and compile hot code later. Racket itself compiles to machine code (on the Chez Scheme back end) while giving you an interactive REPL. ``Compiled vs.\ interpreted'' describes none of these languages.

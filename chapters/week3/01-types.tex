@@ -1,0 +1,173 @@
+\section{Types in plai-typed}
+\label{sec:types}
+
+\code{plai-typed} is installed with \code{raco pkg install plai-typed}, and a file starts with \code{\#lang plai-typed}. It looks like Racket, but a type checker reads the whole program first, and a program that fails the check does not run at all.
+
+\subsection{Every Value Has a Type}
+
+At the REPL, every answer comes with two lines: the type the checker worked out, starting with \code{-}, and then the value.
+\begin{lstlisting}[style=repl]
+> 3
+- number
+3
+> (+ 3 4)
+- number
+7
+> "hello"
+- string
+"hello"
+> (+ 3 "hello")
+typecheck failed: number vs. string
+\end{lstlisting}
+This is the idea of the lecture in miniature: the type is known \emph{before} the value is computed. The checker does not run \rkt|(+ 3 4)| to find out it is a number; it knows because \code{+} takes numbers and returns a number.
+
+\subsection{Type Inference and Annotations}
+
+No types need to be written. Here the checker sees \rkt|(+ 3 x)|, concludes that \code{x} must be a number, and that the result is one too:
+\begin{lstlisting}
+(define (add3 x)
+  (+ 3 x))
+\end{lstlisting}
+
+\begin{definition}[Type inference]
+\emph{Type inference} is the checker working out the types that the programmer did not write down.
+\end{definition}
+
+Types can also be written, as many or as few as we like. An argument becomes \rkt|(x : number)|, and the return type goes after the argument list. Whatever is left out is inferred:
+\begin{lstlisting}
+(define (add3-v2 (x : number))            ; return type inferred
+  (+ 3 x))
+
+(define (add3-v3 (x : number)) : number   ; both annotated
+  (+ 3 x))
+\end{lstlisting}
+
+\begin{pitfall}[Spaces around the colon]
+\code{(x: number)} is read as one identifier named \code{x:}, followed by \code{number}, and is rejected with \code{expected either <id> or `[<id> : <type>]'}. Write \code{(x : number)}.
+\end{pitfall}
+
+An annotation is a claim the checker verifies, not a hint it trusts. This one is wrong, since \rkt|(+ 3 x)| is a number, so the definition is rejected:
+\begin{lstlisting}
+(define (add3-v4 (x : number)) : string
+  (+ 3 x))
+;; typecheck failed: number vs. string
+\end{lstlisting}
+Either way the program is checked before it runs: a call like \rkt|(add3-v3 "hello")| never gets the chance to fail at run time, because the whole file is rejected.
+
+If the checker can infer the types, why write them? Two reasons from lecture:
+\begin{itemize}
+  \item \textbf{Documentation.} The reader sees what the function takes and returns without reading its body.
+  \item \textbf{Mental model.} Writing the type first makes you decide what the function is supposed to do before you write how it does it.
+\end{itemize}
+
+\subsection{Function Types}
+\label{sec:fntypes}
+
+Functions are values, so they have types. Read the arrow as ``takes \ldots{} and returns \ldots'':
+\begin{lstlisting}[style=repl]
+> add3
+- (number -> number)
+\end{lstlisting}
+With two arguments, both go to the left of the arrow. Annotations can be mixed: in \code{myadd-v2}, \code{y} is unannotated but added to a number, so it is inferred to be one, and the two functions have the same type.
+\begin{lstlisting}
+(define (myadd x y)
+  (+ x y))
+(define (myadd-v2 (x : number) y) : number
+  (+ x y))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+> myadd
+- (number number -> number)
+> myadd-v2
+- (number number -> number)
+\end{lstlisting}
+
+A function that returns a function, \code{make-adder} from \Cref{sec:hof}, now has a type that says so:
+\begin{lstlisting}
+(define (myadd-v3 (x : number))
+  (lambda (y) (+ x y)))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+> myadd-v3
+- (number -> (number -> number))
+> (myadd-v3 2)
+- (number -> number)
+> ((myadd-v3 2) 5)
+- number
+7
+\end{lstlisting}
+Compare the two types. \code{myadd} takes two numbers at once. \code{myadd-v3} takes \emph{one} number and returns a function that waits for the second, so \rkt|(myadd-v3 2)| is not a number yet but a function.
+
+\subsection{Lists Are Homogeneous}
+
+A list type says what its elements are, and every element must have that type:
+\begin{lstlisting}[style=repl]
+> (list 1 2 3 4)
+- (listof number)
+'(1 2 3 4)
+> (cons 3 (cons 4 empty))
+- (listof number)
+'(3 4)
+> (list 1 "hello")
+typecheck failed: number vs. string
+> (cons 3 4)
+typecheck failed: (listof number) vs. number
+\end{lstlisting}
+Plain Racket accepts both of the last two. In \code{plai-typed} the second argument of \code{cons} must be a list, so bare pairs (\Cref{sec:lists}) are impossible. In exchange, list operations have precise types: the checker knows \rkt|(first (list 1 2 3 4))| is a \code{number} and \rkt|(rest (list 1 2 3 4))| a \code{(listof number)}, and likewise for \code{second} and \code{third}, without running anything.
+
+\subsection{Pairs}
+
+When two values of different types belong together, use a \emph{pair} (a tuple). Its type is written with \code{*}:
+\begin{lstlisting}[style=repl]
+> (pair 1 "hello")
+- (number * string)
+'#(1 "hello")
+> (fst (pair 1 2))
+- number
+1
+> (snd (pair 1 2))
+- number
+2
+> (car (pair 1 2))
+car: unbound identifier
+\end{lstlisting}
+A list has any length but one element type; a pair has exactly two slots, each with its own type. A pair is not a cons cell, and \code{plai-typed} provides no \code{car} or \code{cdr} at all: use \code{fst}/\code{snd} for pairs and \code{first}/\code{rest} for lists.
+
+\subsection{Polymorphic Types}
+
+Asking for the type of \code{first} shows something new:
+\begin{lstlisting}[style=repl]
+> first
+- ((listof 'a) -> 'a)
+> rest
+- ((listof 'a) -> (listof 'a))
+> cons
+- ('a (listof 'a) -> (listof 'a))
+> fst
+- (('a * 'b) -> 'a)
+> map
+- (('a -> 'b) (listof 'a) -> (listof 'b))
+\end{lstlisting}
+
+\begin{definition}[Type variable, parametric polymorphism]
+\code{'a} (read ``alpha'') is a \emph{type variable}: any type may stand in its place, but every \code{'a} in one type must stand for the \emph{same} type. A single definition that works uniformly at every type in this way is \emph{parametrically polymorphic}; other languages call it generics.
+\end{definition}
+
+So \code{first} takes a \code{(listof number)} to a \code{number} and a \code{(listof string)} to a \code{string}, but can never take a list of numbers to a string. Different letters allow different types: \code{fst} takes a pair of an \code{'a} and a \code{'b} and returns the \code{'a}. And the type of \code{map} alone says most of what \code{map} does: given a function from \code{'a} to \code{'b} and a list of \code{'a}, it produces a list of \code{'b}.
+
+\subsection{Why Insist on Homogeneous Lists?}
+
+Suppose \rkt|(list 1 "hello")| were allowed; call it \code{l}. What is the type of \rkt|(first l)|? It depends on which element happens to come first, and the checker cannot know that before the program runs. Then
+\begin{itemize}
+  \item every use of \code{first} would need a check at run time, which is exactly what a type checker is supposed to spare us, and
+  \item \rkt|(map f l)| is only safe if \code{f} accepts \emph{both} numbers and strings, which \code{('a -> 'b)} cannot express.
+\end{itemize}
+One could design a type that lists every position, something like \code{(listof number string number)} for \rkt|(list 1 "hello" 2)|, but then every list function (\code{map}, \code{filter}, the folds) would need a far more complicated type. The simpler fix keeps lists homogeneous and instead makes \emph{one} type that covers all the kinds of things to be mixed. That is what \code{define-type} is for.
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{How inference works} \code{plai-typed} uses Hindley--Milner style inference, the algorithm behind ML, OCaml, and Haskell. Every unannotated position gets a fresh type variable; every use generates an equation (\rkt|(+ 3 x)| demands $\tau_x = \code{number}$); and \emph{unification} solves the equations. If they have no solution, the error names the two types that clashed, as in \code{number vs.\ string}. Whatever remains unconstrained becomes a type variable such as \code{'a}, which is how \code{first} gets a polymorphic type without any annotation.
+
+\subsubsection{Soundness} The guarantee behind ``rejected before it runs'' is \emph{type soundness}: a well-typed program never reaches a state where an operation is applied to the wrong kind of value. It is usually proved as \emph{progress} (a well-typed expression is a value or can take a step) plus \emph{preservation} (a step keeps the type)~\cite[Chapter~8]{TAPL}. Soundness does not rule out every error: \rkt|(first empty)| and division by zero still fail at run time, because the type \code{(listof number)} does not say whether the list is empty.
+
+\subsubsection{\code{plai-typed} vs.\ Typed Racket} Racket ships another typed language, Typed Racket, designed to type existing Racket programs. It supports union types such as \code{(U Number String)}, so \rkt|(list 1 "hello")| is fine there, with type \code{(Listof (U Number String))}, and occurrence typing that refines a union after a test like \code{number?}. \code{plai-typed} is deliberately simpler, which is what makes full inference possible.

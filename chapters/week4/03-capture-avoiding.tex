@@ -1,0 +1,84 @@
+\section{Capture-Avoiding Substitution}
+\label{sec:capavoid}
+
+\subsection{Rename, Then Substitute}
+
+The fix is \emph{capture-avoiding substitution}: before substituting into the body of an inner \code{let}, rename its bound variable to a fresh name that appears nowhere else. Renaming a bound variable never changes what a program means (that was the point of the \code{y}/\code{z} example), so we are free to do it whenever it helps.
+\begin{lstlisting}[style=repl]
+(let x y (let y 2 (+ x y)))
+---> (let x y (let g3189 2 (+ x g3189)))    rename the inner y first
+---> (let g3189 2 (+ y g3189))              the free y is no longer captured
+---> (+ y 2)
+---> eval: unbound variable                 same answer as the z version
+\end{lstlisting}
+The only question is where the fresh name comes from.
+
+\subsection{\texttt{gensym}: Fresh Names}
+
+\code{gensym} (``generate symbol'') is a Racket function that returns a brand-new symbol every time it is called:
+\begin{lstlisting}[style=repl]
+> (gensym)
+'g3189
+> (gensym)
+'g3190
+> (equal? (gensym) (gensym))
+#f
+\end{lstlisting}
+A name chosen by hand, such as \code{'tmp}, does not work: the program might already use \code{tmp}, and then the renaming would create exactly the capture it was meant to avoid.
+
+\begin{definition}[Uninterned symbol]
+An ordinary symbol is \emph{interned}: \code{'y} is the same symbol wherever it is written, so \rkt|(equal? 'y 'y)| is \code{\#t}. The symbol returned by \code{gensym} is \emph{uninterned}: it is different from every other symbol, including one spelled the same way.
+\end{definition}
+Even if a program literally contained the name \code{g3189}, it would not be \code{equal?} to the \code{g3189} that \code{gensym} returned:
+\begin{lstlisting}
+(define g (gensym))                                ; prints as 'g3189
+(equal? g (string->symbol (symbol->string g)))     ; #f
+\end{lstlisting}
+So a gensym can never be captured by, or capture, any name the user wrote.
+
+\subsubsection{Importing it into \code{plai-typed}} \code{plai-typed} does not provide \code{gensym}, and it cannot check a plain Racket import without knowing its type. \code{typed-in} imports a function from a Racket module and declares its type at the same time:
+\begin{lstlisting}
+(require (typed-in racket/base [gensym : (-> symbol)]))
+\end{lstlisting}
+\code{(-> symbol)} means ``takes no arguments and returns a symbol''. The checker trusts this declaration; it does not check Racket's code.
+
+\subsection{\texttt{subst-lazy-v2}}
+
+Only the binding case changes. If the inner \code{let} binds the same name as the one being replaced, stop, as before. Otherwise:
+\begin{enumerate}
+  \item let \code{z} be \rkt|(gensym)|, a name that appears nowhere else;
+  \item rename \code{y} to \code{z} in the body: \rkt|(subst-lazy (idC z) y e2)|. This cannot cause capture, because no \code{let} inside \code{e2} binds the fresh \code{z};
+  \item substitute \code{v} for \code{x} in the renamed body.
+\end{enumerate}
+\begin{lstlisting}
+(define (subst-lazy-v2 (v : ArithE) (x : symbol) (e : ArithE)) : ArithE
+  (type-case ArithE e
+    [numC (n) e]
+    [idC (y) (if (equal? x y) v e)]
+    [plusC (e1 e2) (plusC (subst-lazy-v2 v x e1) (subst-lazy-v2 v x e2))]
+    [timesC (e1 e2) (timesC (subst-lazy-v2 v x e1) (subst-lazy-v2 v x e2))]
+    [letC (y e1 e2)
+          (if (equal? x y)
+              (letC y (subst-lazy-v2 v x e1) e2)
+              (let [(z (gensym))]
+                (letC z
+                      (subst-lazy-v2 v x e1)
+                      (subst-lazy-v2 v x (subst-lazy (idC z) y e2)))))]))
+\end{lstlisting}
+\begin{lstlisting}
+(subst-lazy-v2 (idC 'y) 'x (parse '(let y 2 (+ x y))))
+;; = (letC 'g3445 (numC 2) (plusC (idC 'y) (idC 'g3445)))
+\end{lstlisting}
+The inner \code{y} became \code{g3445}, and the \code{y} that came from outside is still free, so evaluation reports it as unbound. Now the \code{y} and \code{z} versions of the program agree.
+
+\begin{remark}
+Step~2 uses the old \code{subst-lazy}, which may capture in general. It is safe here because the expression being substituted, \rkt|(idC z)|, contains only the fresh name \code{z}, which nothing in \code{e2} can bind.
+\end{remark}
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{$\alpha$-equivalence} Two expressions that differ only in the names of bound variables, consistently renamed, are \emph{$\alpha$-equivalent}: \code{(let y 2 (+ x y))} and \code{(let z 2 (+ x z))} are. Semantics is defined up to $\alpha$-equivalence, so an implementation may rename at will, and capture-avoiding substitution is precisely ``rename to avoid a clash, then substitute''. In the textbook definition~\cite[Section~5.3]{TAPL}, the binder case only requires $y \ne x$ and $y \notin \FV(v)$; renaming is needed only when $y \in \FV(v)$. The lecture code renames on every binder, which is simpler and also correct.
+
+\subsubsection{Avoiding names altogether} Implementations often sidestep renaming by not using names for bound variables at all. With \emph{de Bruijn indices}, a variable is replaced by the number of binders between its use and its binder: \code{(let y 2 (+ x y))} becomes, schematically, \code{(let 2 (+ x \#0))}, and $\alpha$-equivalent terms become identical. Substitution then shifts indices instead of renaming. Proof assistants and compilers use this or the ``locally nameless'' hybrid (indices for bound variables, names for free ones).
+
+\subsubsection{Environments} Substitution rebuilds the body for every \code{let} and every function call, which costs time proportional to the body's size each time. Real interpreters instead keep an \emph{environment}, a map from names to values, and look names up when they are used; \cite[Chapter~6]{PLAI} makes this switch and shows that it is easy to get wrong in a way that yields dynamic scope (\Cref{sec:scopestate}). The substitution-based interpreter remains the reference: an environment-based one is correct if it always gives the same answers.

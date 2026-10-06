@@ -1,0 +1,98 @@
+\section{Expressions, Functions, and Recursion}
+\label{sec:exprrec}
+
+\subsection{Racket Is an Expression Language}
+
+A Racket program is not a list of steps to perform; it is an expression, and running it means simplifying that expression until only a value is left. Every construct below, including conditionals and function bodies, is an expression that produces a value.
+
+Every call is written the same way: the function first, then its arguments, all inside parentheses. So addition is \rkt|(+ 3 x)|, not \code{3 + x}, and calling \code{foo} on 4 is \rkt|(foo 4)|.
+
+\subsection{Defining Functions}
+
+\rkt|(define (name argument ...) body)| gives a name to a function.
+
+\begin{lstlisting}
+(define (foo x)
+  (+ 3 x))
+\end{lstlisting}
+
+There is no \code{return} keyword, because there is nothing to return \emph{from}: the body is a single expression, and its value is the answer. \rkt|(foo 4)| evaluates to \code{7}.
+
+\subsection{Conditionals}
+
+\code{cond} chooses between answers. It takes clauses written \code{[test result]}, tries the tests top to bottom, and returns the result of the first test that is true. \code{else} is the catch-all at the bottom.
+
+\begin{lstlisting}
+(define (my-abs x)
+  (cond
+    [(> x 0) x]
+    [(< x 0) (- x)]
+    [else 0]))
+\end{lstlisting}
+
+\code{cond} is an \emph{expression}, not a statement. It produces a value, which is why it can be the entire body of \code{my-abs}: there is no assignment and nothing to return, and the value of the \code{cond} is the value of the function. With one argument, \rkt|(- x)| is negation. Only the chosen branch is evaluated, so a branch that would divide by zero is harmless as long as its test is false.
+
+\subsection{Recursion}
+
+Recursion is how repetition is done. A recursive function needs two things:
+\begin{itemize}
+  \item a \emph{base case} that answers directly, without recurring, and
+  \item a \emph{recursive case} that makes the problem smaller, in a way that eventually reaches the base case, and trusts the function itself with the rest.
+\end{itemize}
+
+\begin{lstlisting}
+(define (fact x)
+  (cond
+    [(= x 0) 1]
+    [else (* x (fact (- x 1)))]))
+\end{lstlisting}
+
+The way to check a recursive function by hand is to rewrite the expression one step at a time:
+\begin{lstlisting}[style=repl]
+(fact 3)
+---> (* 3 (fact 2))
+---> (* 3 (* 2 (fact 1)))
+---> (* 3 (* 2 (* 1 (fact 0))))
+---> (* 3 (* 2 (* 1 1)))
+---> 6
+\end{lstlisting}
+
+The \code{*} sits \emph{outside} the recursive call, so no multiplication can happen on the way down. Each level waits for the one below it, and every level stays on the stack until the recursion bottoms out. The trace grows a tower of pending multiplications.
+
+\subsection{Tail Recursion}
+
+The work can be rearranged so that the multiplying happens on the way \emph{down}. Pass the answer-so-far along as an extra argument, an \emph{accumulator}:
+
+\begin{lstlisting}
+(define (fact-helper x acc)
+  (cond
+    [(= x 0) acc]
+    [else (fact-helper (- x 1) (* acc x))]))
+
+(define (fact-tail x)
+  (fact-helper x 1))
+\end{lstlisting}
+
+The accumulator starts at 1, the value that leaves a product unchanged; a sum would start at 0.
+
+\begin{definition}[Tail call]
+A call is a \emph{tail call} if it is the last thing the calling function does: its result is returned unchanged, with no work left pending. Racket guarantees that a tail call reuses the caller's stack frame instead of pushing a new one.
+\end{definition}
+
+The recursive call in \code{fact-helper} is a tail call, so the function runs in constant stack space, like a loop:
+\begin{lstlisting}[style=repl]
+(fact-helper 3 1)
+---> (fact-helper 2 3)
+---> (fact-helper 1 6)
+---> (fact-helper 0 6)
+---> 6
+\end{lstlisting}
+Nothing is ever pending, because \code{acc} is a finished number at every step. Since \code{fact-helper} takes two arguments and \code{fact} one, the wrapper \code{fact-tail} keeps the interface the same. Hiding the helper is a recurring theme; \Cref{sec:listsrec} does it with a named \code{let}.
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{The substitution model} The step-by-step traces above follow the \emph{substitution model} of evaluation~\cite[Section~1.1.5]{SICP}: to apply a function, evaluate its arguments, substitute the values for the parameters in the body, and continue with the body. This is a valid way to reason about a program exactly when the program is pure (\Cref{sec:scopestate}). It is also, almost literally, the first interpreter we will build in \Cref{ch:week4}, where \code{let} and function application are implemented by a function named \code{subst}.
+
+\subsubsection{Recursive process vs.\ iterative process} SICP distinguishes the \emph{procedure}, which may be recursive syntactically, from the \emph{process} it generates. \code{fact} generates a linear recursive process (stack depth $n$); \code{fact-helper} is also recursive as a procedure but generates an iterative process (constant depth). In a language with guaranteed tail calls, there is no need for special loop syntax: a loop is a tail-recursive function.
+
+\subsubsection{Tail calls in other languages} Scheme and Racket require proper tail calls, so the guarantee holds for \emph{every} tail call, not only self-calls. Many languages do not: CPython deliberately does not eliminate tail calls (the stack depth is capped at about 1000 by default), and Java and Rust do not guarantee it either. A C compiler may optimize tail calls at higher optimization levels, but the language does not promise it.

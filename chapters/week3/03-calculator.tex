@@ -1,0 +1,173 @@
+\section{S-Expressions and the Calculator}
+\label{sec:calc}
+
+\subsection{Quote and Symbols}
+
+The apostrophe \code{'}, read ``quote'', means ``do not evaluate this; keep it as data''. Without it, \code{x} is a variable to look up. With it, \code{'x} is the name itself, a \emph{symbol}:
+\begin{lstlisting}[style=repl]
+> x
+x: free variable while typechecking in: x
+> 'x
+- symbol
+'x
+\end{lstlisting}
+Quoting a parenthesized expression keeps the whole thing as data, without doing the addition:
+\begin{lstlisting}[style=repl]
+> '(1 (+ 2 3) 4)
+- s-expression
+'(1 (+ 2 3) 4)
+\end{lstlisting}
+
+\subsection{S-Expressions}
+
+Look at what \code{'(+ 2 3)} contains: a symbol and two numbers. That is exactly the kind of mixed list that \Cref{sec:types} ruled out. So \code{plai-typed} gives all quoted data one type, \tyname{s-expression}, and provides functions to ask what a piece is and to convert it back out:
+\begin{lstlisting}[style=repl]
+> (s-exp->list '(+ 2 3))
+- (listof s-expression)
+'(+ 2 3)
+> (first (s-exp->list '(+ 2 3)))
+- s-expression
+'+
+> (s-exp->symbol (first (s-exp->list '(+ 2 3))))
+- symbol
+'+
+> (s-exp->number (second (s-exp->list '(+ 2 3))))
+- number
+2
+\end{lstlisting}
+
+\begin{keypoint}[Ask, then convert]
+Ask with \code{s-exp-number?}, \code{s-exp-symbol?}, or \code{s-exp-list?}, then convert with the matching \code{s-exp->number}, \code{s-exp->symbol}, or \code{s-exp->list}. A conversion fails at run time if the guess was wrong.
+\end{keypoint}
+
+\begin{pitfall}[A lone quoted symbol is not an s-expression]
+\code{'x} has type \tyname{symbol}, not \tyname{s-expression}, so \code{(parse 'x)} is a type error. To get an s-expression for one symbol, write \rkt|`x| (backquote) or \rkt|(symbol->s-exp 'x)|.
+\end{pitfall}
+
+\subsection{Concrete and Abstract Syntax}
+
+The first interpreter is a calculator:
+\begin{lstlisting}[style=repl]
+'(+ 2 3)                     ===> 5
+'(* 3 4)                     ===> 12
+'(* (+ 2 3) (* 5 (+ 6 7)))   ===> 325
+\end{lstlisting}
+Following \cite[Chapters~2--3]{PLAI}, the work is split into separate steps (\Cref{fig:pipeline}):
+\begin{itemize}
+  \item \textbf{Concrete syntax} is what the programmer types, the text \code{(+ 2 3)}. Racket's \emph{reader} already turns text into an s-expression, so we get that step for free; quote is how we hand an s-expression over directly.
+  \item \textbf{Abstract syntax} is a tree that keeps only the meaning. \code{parse} turns an s-expression into this tree, rejecting anything that is not a valid program.
+  \item The \textbf{interpreter} walks the tree and computes the answer. \cite{PLAI} calls it \code{interp}; in lecture it is \code{eval}.
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=4mm and 14mm]
+  \node[box, fill=greybg] (t) {text};
+  \node[box, fill=uspace, right=of t] (s) {s-expression};
+  \node[box, fill=kspace, right=of s] (a) {\tyname{ArithE}};
+  \node[box, fill=tsk, right=of a] (n) {number};
+  \draw[arr] (t) -- node[above, lbl] {read} (s);
+  \draw[arr] (s) -- node[above, lbl] {\code{parse}} (a);
+  \draw[arr] (a) -- node[above, lbl] {\code{eval}} (n);
+  \node[below=2mm of t, lbl] (et) {\code{"(+ 2 3)"}};
+  \node[below=2mm of s, lbl] (es) {\code{'(+ 2 3)}};
+  \node[below=2mm of a, lbl, align=center] (ea) {\code{(plusC (numC 2)}\\\code{(numC 3))}};
+  \node[below=2mm of n, lbl] (en) {\code{5}};
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror}] ([yshift=-11mm]t.south west) -- ([yshift=-11mm]s.south east) node[midway, below=5pt, lbl] {concrete syntax};
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror}] ([yshift=-11mm,xshift=-6mm]a.south west) -- ([yshift=-11mm,xshift=6mm]a.south east) node[midway, below=5pt, lbl] {abstract syntax};
+\end{tikzpicture}
+\caption{The interpreter pipeline. Racket's reader provides the first step.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{The Calculator}
+
+\subsubsection{Abstract syntax} One variant per kind of expression:
+\begin{lstlisting}
+(define-type ArithE
+  [numC (n : number)]
+  [plusC (e1 : ArithE) (e2 : ArithE)]
+  [timesC (e1 : ArithE) (e2 : ArithE)])
+\end{lstlisting}
+The operands of \code{plusC} are \tyname{ArithE}, not \code{number}. That is what allows \code{'(* (+ 2 3) 4)}: the left operand of the multiplication is itself an addition, the same trick as \tyname{Tree} having subtrees (\Cref{fig:calcast}).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[level distance=9mm, every node/.style={ast},
+    level 1/.style={sibling distance=34mm}, level 2/.style={sibling distance=17mm}, level 3/.style={sibling distance=12mm}]
+  \node[asth] {timesC}
+    child {node {plusC} child {node[astl] {numC 2}} child {node[astl] {numC 3}}}
+    child {node[asth] {timesC}
+      child {node[astl] {numC 5}}
+      child {node {plusC} child {node[astl] {numC 6}} child {node[astl] {numC 7}}}};
+\end{tikzpicture}
+\caption{The abstract syntax of \code{'(* (+ 2 3) (* 5 (+ 6 7)))}. Parentheses are gone; the nesting is the tree.}
+\label{fig:calcast}
+\end{figure}
+
+\subsubsection{The interpreter} One clause per variant:
+\begin{lstlisting}
+(define (eval (e : ArithE)) : number
+  (type-case ArithE e
+    [numC (n) n]
+    [plusC (e1 e2) (+ (eval e1) (eval e2))]
+    [timesC (e1 e2) (* (eval e1) (eval e2))]))
+\end{lstlisting}
+Three variants, three clauses, and a recursive call wherever the type mentions \tyname{ArithE}. \code{eval} never checks whether its input makes sense, and it does not have to: a value of type \tyname{ArithE} can only be built from the three constructors, so every tree it receives is well formed.
+
+\subsubsection{The parser} That guarantee has to come from somewhere, and it comes from \code{parse}. The version written in lecture:
+\begin{lstlisting}
+(define (parse (s : s-expression)) : ArithE
+  (cond
+    [(s-exp-number? s) (numC (s-exp->number s))]
+    [(s-exp-list? s)
+     (let [(l (s-exp->list s))]
+       (case (s-exp->symbol (first l))
+         [(+) (plusC (parse (second l)) (parse (third l)))]
+         [(*) (timesC (parse (second l)) (parse (third l)))]))]))
+\end{lstlisting}
+A number becomes a \code{numC}. A list is dispatched on its first element with \code{case}, which compares a symbol against literal symbols, and each operand is parsed recursively. Putting the steps together, \rkt|(eval (parse '(* (+ 2 3) (* 5 (+ 6 7)))))| is 325.
+
+\subsection{What Malformed Input Does}
+
+The lecture parser is right on well-formed input, but on bad input it either crashes with a message about something else, or quietly builds a wrong tree:
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+input & result \\
+\midrule
+\code{(parse '(- 1 2))} & \code{case: no matching clause} \\
+\code{(parse '(+ 1))} & \code{third: list contains too few elements} \\
+\code{(parse '(+ 1 2 3))} & \code{(plusC (numC 1) (numC 2))}: the 3 is silently dropped \\
+\bottomrule
+\end{tabular}
+\end{center}
+The last one is the worst kind of bug: no error, just a program that means something other than what was written. A more careful parser checks the shape of each form and reports what was expected. This version is not from lecture, but every check in it addresses one row of the table:
+\begin{lstlisting}
+(define (parse (s : s-expression)) : ArithE
+  (cond
+    [(s-exp-number? s) (numC (s-exp->number s))]
+    [(s-exp-list? s)
+     (let [(l (s-exp->list s))]
+       (if (and (= (length l) 3) (s-exp-symbol? (first l)))
+           (case (s-exp->symbol (first l))
+             [(+) (plusC (parse (second l)) (parse (third l)))]
+             [(*) (timesC (parse (second l)) (parse (third l)))]
+             [else (error 'parse "unknown operator")])
+           (error 'parse "expected (op e1 e2)")))]
+    [else (error 'parse "expected a number or a list")]))
+\end{lstlisting}
+\begin{itemize}
+  \item The length check rejects \code{'(+ 1)} and \code{'(+ 1 2 3)}.
+  \item \code{s-exp-symbol?} rejects \code{'(1 2 3)}, whose head is not an operator at all.
+  \item The \code{else} of \code{case} rejects operators the language does not have, such as \code{-}.
+  \item The final \code{else} rejects anything that is neither a number nor a list, such as a lone symbol.
+\end{itemize}
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{Why parsing is cheap here} Real languages need a lexer and a parser, often generated from a grammar, to get from text to a tree. Lisp-family languages put that work into one generic step: the reader turns any text into nested lists of atoms, and each language then only has to interpret those lists. \cite[Chapter~2]{PLAI} uses this to skip parsing entirely. The flip side is that the s-expression \code{'(+ 1 2 3)} is perfectly well formed as data; deciding that it is not a valid \emph{calculator} program is the job of \code{parse}.
+
+\subsubsection{Homoiconicity and quasiquote} Racket code is itself written as s-expressions, so programs can build programs as data. Quasiquote makes that convenient: if \code{x} is 5, then \rkt|`(+ ,x 1)| is the list \code{'(+ 5 1)}. Everything is quoted except the parts marked with a comma, which are evaluated and spliced in; \code{,@xs} splices in the elements of a whole list. Racket macros are functions from syntax to syntax built on the same idea, which is a large part of why Racket is good at implementing languages.
+
+\subsubsection{Desugaring} The calculator has no subtraction. One way to add it without touching \code{eval} is to translate it in the parser: \code{(- a b)} becomes \code{(plusC a (timesC (numC -1) b))}. Languages are usually defined as a small \emph{core} interpreted directly plus a \emph{surface} that desugars into it~\cite[Chapter~4]{PLAI}. The core stays small enough to reason about, and the surface stays convenient.
