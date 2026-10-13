@@ -113,11 +113,3 @@ The two programs differ only in renaming the inner \code{y} to \code{z}, so they
 \end{keypoint}
 
 \code{eval-eager} does not have this problem: it only ever substitutes numbers, and a number contains no names to capture. Lazy substitution substitutes whole expressions, which can contain free variables. (Once values can be functions, eager evaluation substitutes code too, and capture returns; see \Cref{sec:eagerapp}.)
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Evaluation strategies} The two substitution regimes are the two classic \emph{parameter-passing strategies}. Eager substitution is \emph{call-by-value}, used by Racket, OCaml, Python, Java, and most languages. Lazy substitution is \emph{call-by-name}, used for procedure parameters in Algol~60. The recomputation problem has a standard fix, \emph{call-by-need}: substitute a reference to a shared \emph{thunk} that evaluates \code{e1} the first time it is used and remembers the result. That is Haskell's evaluation strategy, and it keeps lazy's advantage (unused arguments are never evaluated) without its cost. Call-by-need gives the same results as call-by-name in a pure language; with effects, the number of times an effect happens becomes observable.
-
-\subsubsection{Laziness is visible} A strategy is not just an efficiency choice when evaluation can fail or loop. If \code{e1} loops forever, \code{(let x e1 10)} loops under call-by-value and returns 10 under call-by-name. This lets lazy languages define their own control structures as ordinary functions: \code{if} could be a function in Haskell, but not in Racket, where both branches would be evaluated before the call.
-
-\subsubsection{Capture in practice} Capture is not only a toy-interpreter bug. C preprocessor macros substitute text and capture freely: a macro body that declares \code{int tmp} silently changes the meaning of a caller's \code{tmp}. Racket's \emph{hygienic} macros rename binders automatically to prevent exactly this, which is the macro-level version of the fix in the next section.

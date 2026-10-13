@@ -278,7 +278,7 @@ Static: \code{(numV 6)}. Dynamic: \code{lookup: unbound variable: n}. This is th
   body (+ n m) runs in that env extended with m = 1
   lookup n  --->  unbound variable: n
 \end{lstlisting}
-The binding of \code{n} disappeared when \code{make-adder} returned, but the function that uses it did not. This is the upward funarg problem of \Cref{sec:dynscope}: returning a function needs the environment of its definition.
+The binding of \code{n} disappeared when \code{make-adder} returned, but the function that uses it did not. This is why closures save their environment: returning a function needs the environment of its definition.
 \end{solution}
 
 \begin{exercise}[Predict, part e]
@@ -526,13 +526,3 @@ The rest of the file hints at \emph{dependent types}, types that mention values:
   \item \code{crazy (xs : Array Int) : (if xs.size > 10 then String else Int)} has a return type that depends on the \emph{length} of its argument. A caller can use the result only after finding out which branch holds, which is what \code{if h : xs.size > 10} in \code{crazier} does: \code{h} is a proof of the condition, available inside the branch.
 \end{itemize}
 The bodies are \code{sorry}, Lean's placeholder that type checks as anything; the file shows what can be \emph{stated}, not how to prove it.
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Defunctionalization} The two environment representations are related by a mechanical transformation. Collect every \code{lambda} that builds an environment (here two, in \code{empty-env} and \code{extend-env}), give each a variant of a data type holding its free variables (\code{empty} with none; \code{extend} with \code{x}, \code{v}, \code{env}), and replace each call of an environment by an \code{apply-env} function that \code{type-case}s on the variant and runs the corresponding body. The result is exactly the list environment of \Cref{sec:env}. This is \emph{defunctionalization}, introduced by Reynolds in the paper that started definitional interpreters~\cite{Reynolds}. It is also how compilers implement first-class functions in languages without them, and why a list environment is ``the same'' interpreter as a function environment.
-
-\subsubsection{Implementing dynamic scope: deep and shallow binding} \code{eval-env} with \code{dynamic?} = \code{\#t} implements dynamic scope by \emph{deep binding}: the current environment is a chain searched from the newest binding. bash and early Lisps instead use \emph{shallow binding}: each name has one global slot holding its current value; \code{local x=3} saves the old value of the slot, overwrites it, and restores it on return. Lookup is then constant time, at the cost of save and restore on every call. That is why \code{g}'s \code{x=2} in Assignment, part b is lost: it overwrote \code{f}'s value in the shared slot, and \code{f}'s return restored the global 1.
-
-\subsubsection{How hygiene is implemented} Early hygienic expanders (Kohlbecker et~al., 1986) renamed every identifier introduced by a macro with a fresh name, as above. Racket's current expander uses \emph{sets of scopes}: each identifier carries a set of scope marks, one per binding form or macro expansion it passed through, and a use refers to the binding whose scope set is the largest subset of the use's. Macro-introduced \code{tmp} and user \code{tmp} get different scope sets, so they never meet. Hygiene can be broken on purpose (\code{datum->syntax}) for macros that are meant to bind a name for the user, such as an anaphoric \code{aif} that binds \code{it}. Common Lisp's \code{defmacro} is unhygienic; there the programmer calls \code{gensym} by hand, exactly as \code{subst} did.
-
-\subsubsection{C workarounds} C code avoids the \code{SWAP} problem by convention: reserved-looking names such as \code{\_\_swap\_tmp}, or, in GCC, \code{\_\_typeof\_\_} with a name built from \code{\_\_LINE\_\_} or \code{\_\_COUNTER\_\_}. None of these is a guarantee, only a name unlikely to be used. The other classic C macro bugs, missing parentheses (\code{\#define SQ(x) x*x} applied to \code{a+1}) and arguments evaluated twice (\code{SQ(i++)}), come from the same source: the preprocessor substitutes text, not expressions.

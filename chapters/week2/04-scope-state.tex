@@ -114,24 +114,3 @@ A \emph{box} is a mutable container with exactly one slot, the smallest possible
 \end{lstlisting}
 
 The point of a box is that mutability is \emph{visible}. A plain 3 can never change; a box holding 3 announces that someone may change it, so a reader can tell where the state lives. By convention, a name ending in \code{!} mutates something: a warning that calling it twice is not the same as calling it once.
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{\code{letrec}} \code{letrec} makes the new names visible in all the right-hand sides, so they can refer to themselves and each other:
-\begin{lstlisting}
-(letrec ([even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))]
-         [odd?  (lambda (n) (if (= n 0) #f (even? (- n 1))))])
-  (even? 10))         ; #t
-\end{lstlisting}
-Internal \code{define}s in a function body behave like \code{letrec}. Implementing recursion in an interpreter is surprisingly subtle; \cite[Chapter~9]{PLAI} shows that it needs either mutation or a fixed-point trick.
-
-\subsubsection{Dynamic scope} The alternative to lexical scope is \emph{dynamic} scope, where a name refers to its most recent binding \emph{at run time}. Under dynamic scope,
-\begin{lstlisting}
-(define (f) x)
-(let ([x 5]) (f))
-\end{lstlisting}
-would return 5, because \code{x} was bound to 5 when \code{f} ran; under lexical scope it is an error, since no \code{x} is visible where \code{f} is written. Early Lisps and Emacs Lisp (by default) used dynamic scope. It makes a function's meaning depend on every caller, which is why almost all modern languages are lexically scoped. Racket offers a controlled form of dynamic binding through \emph{parameters} (\code{make-parameter}, \code{parameterize}).
-
-\subsubsection{Boxes vs.\ \code{set!}} Racket also has \code{set!}, which mutates a variable directly: \rkt|(set! x (+ x 1))|. Boxes make the mutable thing a first-class value; \code{set!} makes every variable potentially mutable, which complicates reasoning (and closures that capture a mutated variable see the change). \cite[Chapter~8]{PLAI} implements both and explains why they need different machinery in an interpreter: a \emph{store} that maps locations to values, threaded through every evaluation step.
-
-\subsubsection{Referential transparency} ``An expression can be replaced by its value'' is called \emph{referential transparency}. It is what licenses equational reasoning and compiler optimizations such as common-subexpression elimination. Languages such as Haskell enforce it everywhere and track effects in types; Racket leaves it to discipline.

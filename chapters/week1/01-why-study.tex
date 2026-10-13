@@ -77,9 +77,3 @@ This course builds interpreters. Compilers are the subject of Compiler Construct
   \item \textbf{Grading.} Final exam 50\%, homework 50\%.
   \item \textbf{Homework.} Five assignments of two to three weeks each, done individually. Assignment~1 is a Racket warm-up, pure programming, auto-graded. Assignments 2--5 combine programming with conceptual questions. Up to 72 hours of lateness are allowed in total across all assignments; see the syllabus for details.
 \end{itemize}
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Definitional interpreters} The idea of explaining a language by writing an interpreter for it is old. Reynolds~\cite{Reynolds} called such programs \emph{definitional interpreters}: the interpreter, written in a language we already understand, \emph{is} the definition of the new language. The method has a catch Reynolds also pointed out: if the defining language has a feature (say, eager evaluation or higher-order functions), the defined language can silently inherit it. Much of this course is about \emph{not} inheriting features by accident. In \Cref{sec:rec2}, for example, our language's \code{and} is implemented by Racket's \code{and}, so it short-circuits exactly when Racket's does.
-
-\subsubsection{Language vs.\ implementation, in practice} Python is usually run by CPython, which compiles source to bytecode and then interprets the bytecode; PyPy runs the same language with a just-in-time compiler. JavaScript engines interpret first and compile hot code later. Racket itself compiles to machine code (on the Chez Scheme back end) while giving you an interactive REPL. ``Compiled vs.\ interpreted'' describes none of these languages.

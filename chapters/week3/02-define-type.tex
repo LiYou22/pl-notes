@@ -105,11 +105,3 @@ cond: no matching clause
 \begin{keypoint}[What \code{type-case} buys]
 \code{type-case} checks before the program runs that every variant is handled, and it gives each clause the variant's fields with their types. A missing case is a static error, not a bug waiting for the right input.
 \end{keypoint}
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Algebraic data types} A \code{define-type} is an \emph{algebraic data type}: a \emph{sum} (one of several variants) of \emph{products} (each variant a tuple of fields). The names come from counting: if a type has $|A|$ values, then $A \times B$ has $|A|\cdot|B|$ values and $A + B$ has $|A| + |B|$. The same idea appears as \code{type ... = | ...} in OCaml, \code{data} in Haskell, \code{enum} with fields in Rust and Swift, and sealed interfaces with records in Java~21. All of them check \code{match} expressions for exhaustiveness, as \code{type-case} does.
-
-\subsubsection{Why exhaustiveness is checkable} Exhaustiveness is decidable because the set of variants is \emph{closed}: \code{define-type} lists all of them in one place, and no other code can add one. Object-oriented class hierarchies are \emph{open}, since any file can add a subclass, so a compiler cannot check that a chain of \code{instanceof} tests is complete. This is one side of the ``expression problem'': with variants, adding a new function is easy and adding a new variant forces you to revisit every function, which the checker then helpfully enumerates.
-
-\subsubsection{The \code{else} clause} \code{type-case} also accepts a final \code{[else ...]}, which makes any set of clauses exhaustive. It is convenient but defeats the check: when a variant is added later, the compiler will not point at this \code{type-case}. Interpreters in this course avoid \code{else} in \code{type-case} for that reason.

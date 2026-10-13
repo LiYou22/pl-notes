@@ -205,15 +205,3 @@ The last program checks that \code{e1} is evaluated in the \emph{outer} environm
 \begin{keypoint}[Environment vs.\ substitution, for \code{let}]
 For this language the two interpreters always agree: each binding in \code{env} is a substitution that has been \emph{postponed} until the name is actually reached. Instead of copying 5 into every \code{x} of the body up front, \code{eval-env} remembers \code{x=5} and fills it in on demand. Substitution is the reference: whenever a later environment interpreter disagrees with it, the environment interpreter has a scope bug. That is how the lecture finds both bugs of \Cref{sec:dynscope,sec:closures}.
 \end{keypoint}
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Why have two implementations at all?} Substitution is the \emph{specification}: it is short, follows the mathematical definition of the language, and is easy to reason about by rewriting, as in every trace of week~4. Environments are the \emph{implementation}: no real interpreter or compiler copies function bodies to fill in arguments. Having both and checking that they agree is a standard technique; the agreement is what makes the fast version trustworthy.
-
-\subsubsection{The correspondence, precisely} For a closed expression $e$, \code{(eval e)} equals \code{(eval-subst e)}. The proof generalizes the statement to any environment $\rho = [x_1{=}v_1, \ldots, x_n{=}v_n]$: evaluating $e$ in $\rho$ gives the same result as evaluating $e$ with the bindings of $\rho$ substituted in, oldest first so that newer bindings win. Then it goes by induction on the evaluation. This is the sense in which an environment is ``substitution, delayed''~\cite[Chapter~6]{PLAI}.
-
-\subsubsection{Frames} These notes write an environment newest-first as \code{[x=6, x=5]}; the code represents it as the list \rkt|(list (bind 'x 6) (bind 'x 5))|. SICP draws the same structure as a chain of \emph{frames}, each pointing to the enclosing one~\cite[Section~3.2]{SICP}.
-
-\subsubsection{Lookup cost} A list environment makes \code{lookup} linear in the number of bindings in scope. Since the program text determines \emph{which} binding each use refers to (lexical scope), a compiler can compute, before running, how far back in the environment each name is: its \emph{lexical address}. Lookup then becomes indexing, with no name comparisons. This is the de Bruijn index idea of the week~4 supplement (\Cref{sec:capavoid}) put to practical use, and it is how most compiled languages turn local variables into stack-frame offsets.
-
-\subsubsection{Environments as functions} An environment only needs to support lookup and extension, so it can also be represented as a function from names to values. Recitation~5 does exactly this (\Cref{sec:rec5}); the interpreter does not change. Choosing a representation behind a small interface like \code{lookup}/\code{extend-env} is what makes such swaps cheap.

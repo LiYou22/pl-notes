@@ -76,11 +76,3 @@ The lecture's version (\code{lec4a.rkt}) splits the \code{letC} case three ways:
 \begin{remark}
 Step~2 uses the old \code{subst-lazy}, which may capture in general. It is safe here because the expression being substituted, \rkt|(idC z)|, contains only the fresh name \code{z}, which nothing in \code{e2} can bind.
 \end{remark}
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{$\alpha$-equivalence} Two expressions that differ only in the names of bound variables, consistently renamed, are \emph{$\alpha$-equivalent}: \code{(let y 2 (+ x y))} and \code{(let z 2 (+ x z))} are. Semantics is defined up to $\alpha$-equivalence, so an implementation may rename at will, and capture-avoiding substitution is precisely ``rename to avoid a clash, then substitute''. In the textbook definition~\cite[Section~5.3]{TAPL}, the binder case only requires $y \ne x$ and $y \notin \FV(v)$; renaming is needed only when $y \in \FV(v)$. The lecture code renames on every binder, which is simpler and also correct.
-
-\subsubsection{Avoiding names altogether} Implementations often sidestep renaming by not using names for bound variables at all. With \emph{de Bruijn indices}, a variable is replaced by the number of binders between its use and its binder: \code{(let y 2 (+ x y))} becomes, schematically, \code{(let 2 (+ x \#0))}, and $\alpha$-equivalent terms become identical. Substitution then shifts indices instead of renaming. Proof assistants and compilers use this or the ``locally nameless'' hybrid (indices for bound variables, names for free ones).
-
-\subsubsection{Environments} Substitution rebuilds the body for every \code{let} and every function call, which costs time proportional to the body's size each time. Real interpreters instead keep an \emph{environment}, a map from names to values, and look names up when they are used; \cite[Chapter~6]{PLAI} makes this switch and shows that it is easy to get wrong in a way that yields dynamic scope (\Cref{sec:scopestate}). The substitution-based interpreter remains the reference: an environment-based one is correct if it always gives the same answers.

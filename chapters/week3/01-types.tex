@@ -163,11 +163,3 @@ Suppose \rkt|(list 1 "hello")| were allowed; call it \code{l}. What is the type 
   \item \rkt|(map f l)| is only safe if \code{f} accepts \emph{both} numbers and strings, which \code{('a -> 'b)} cannot express.
 \end{itemize}
 One could design a type that lists every position, something like \code{(listof number string number)} for \rkt|(list 1 "hello" 2)|, but then every list function (\code{map}, \code{filter}, the folds) would need a far more complicated type. The simpler fix keeps lists homogeneous and instead makes \emph{one} type that covers all the kinds of things to be mixed. That is what \code{define-type} is for.
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{How inference works} \code{plai-typed} uses Hindley--Milner style inference, the algorithm behind ML, OCaml, and Haskell. Every unannotated position gets a fresh type variable; every use generates an equation (\rkt|(+ 3 x)| demands $\tau_x = \code{number}$); and \emph{unification} solves the equations. If they have no solution, the error names the two types that clashed, as in \code{number vs.\ string}. Whatever remains unconstrained becomes a type variable such as \code{'a}, which is how \code{first} gets a polymorphic type without any annotation.
-
-\subsubsection{Soundness} The guarantee behind ``rejected before it runs'' is \emph{type soundness}: a well-typed program never reaches a state where an operation is applied to the wrong kind of value. It is usually proved as \emph{progress} (a well-typed expression is a value or can take a step) plus \emph{preservation} (a step keeps the type)~\cite[Chapter~8]{TAPL}. Soundness does not rule out every error: \rkt|(first empty)| and division by zero still fail at run time, because the type \code{(listof number)} does not say whether the list is empty.
-
-\subsubsection{\code{plai-typed} vs.\ Typed Racket} Racket ships another typed language, Typed Racket, designed to type existing Racket programs. It supports union types such as \code{(U Number String)}, so \rkt|(list 1 "hello")| is fine there, with type \code{(Listof (U Number String))}, and occurrence typing that refines a union after a test like \code{number?}. \code{plai-typed} is deliberately simpler, which is what makes full inference possible.

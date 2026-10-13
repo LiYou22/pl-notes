@@ -173,16 +173,3 @@ The two red rows fail for the same reason and are fixed the same way: some code 
 \end{tabular}
 \end{center}
 The substitution column is the capture-avoiding eager interpreter \code{eval-eager-v3} (\Cref{sec:eagerapp}). Red entries disagree with it for scope reasons; ``---'' means the file has no \code{lambda}. The row \code{(let x (+ y y) 10)} is not a scope difference but the eager/lazy one of \Cref{sec:lazy}: lazy interpreters never evaluate an unused \code{e1}.
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Closures in other languages} Every language with first-class functions and lexical scope builds closures: JavaScript, Python, Java lambdas, C++ lambdas (which make the capture list explicit, \code{[x]} or \code{[\&x]}), Rust closures. C function pointers are not closures; C code passes a separate \code{void *} ``context'' argument to fake one. A well-known Python surprise comes from closures capturing \emph{variables} rather than values:
-\begin{lstlisting}[language={}]
-fs = [lambda: i for i in range(3)]
-[f() for f in fs]        # [2, 2, 2], not [0, 1, 2]
-\end{lstlisting}
-All three closures share the loop's single variable \code{i}, which holds 2 when they are called. In our interpreter variables are immutable, so the difference between capturing a variable and capturing its value cannot be observed; it appears once mutation is added~\cite[Chapter~8]{PLAI}.
-
-\subsubsection{Representing closures} \code{closV} saves the \emph{entire} environment, which keeps every binding in scope alive as long as the closure lives. Compilers instead build \emph{flat closures} that copy only the free variables of the body: for \code{addx}, just \code{x}. Because a closure can outlive the call that created it (returned from \code{make-adder}, stored in a list), its environment must live on the heap, not the stack; this is the ``upward funarg'' of \Cref{sec:dynscope}.
-
-\subsubsection{Recursion needs a cycle} \code{(let fact (lambda n ... (fact (- n 1)) ...) ...)} does not work in \code{lecture5e.rkt}: the closure for \code{fact} saves the environment of the \code{let}, which does not yet contain \code{fact}. A recursive function's closure must contain an environment that contains the closure itself, a cycle. Building it needs either mutation (create the binding first, then fill it in) or a fixed-point trick, which is what \code{letrec} provides~\cite[Chapter~9]{PLAI}.

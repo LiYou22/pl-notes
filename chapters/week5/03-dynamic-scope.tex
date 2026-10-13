@@ -140,11 +140,3 @@ In the last one, \code{x}'s expression \code{y} is evaluated in \code{x}'s saved
 \begin{keypoint}[The fix, in one sentence]
 Run stored code in the environment where it was \emph{written}, not where it is \emph{used}. The pair (expression, environment) is the general tool for this; \Cref{sec:closures} needs it again for functions.
 \end{keypoint}
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Thunks and call-by-need} A pair of an unevaluated expression and its environment is called a \emph{thunk} (or suspension). \code{eval-env2} is call-by-name: a thunk is re-evaluated at every use, so \code{(let x (+ 5 6) (+ x x))} computes \code{(+ 5 6)} twice, as in \Cref{sec:lazy}. Making the thunk a mutable box that is overwritten with its value the first time it is forced gives \emph{call-by-need}, Haskell's strategy~\cite[Chapter~17]{PLAI}. The environment is what makes thunks possible; with substitution, the delayed expression was simply copied into the tree.
-
-\subsubsection{Where dynamic scope survives} The original Lisp of 1958 was dynamically scoped, by the same accident as \code{eval-env1}: its interpreter looked free variables up in the current environment. Emacs Lisp was dynamically scoped until Emacs~24 (2012) added lexical binding as a per-file option, and shell variables (\code{export} in bash) and Perl's \code{local} are dynamically scoped. Controlled dynamic binding is genuinely useful for settings such as ``the current output port'': Racket provides it through \emph{parameters} (\code{parameterize}), as mentioned in \Cref{sec:scopestate}, while ordinary variables stay lexical.
-
-\subsubsection{The funarg problem} The bug of this section, and the one of the next, were known in the 1960s as the \emph{funarg problem}: what environment should code use when it is passed around and run somewhere else? The downward case (passing a function as an argument) and the upward case (returning it) both need the definition-time environment, and the upward case forces environments to outlive the call that created them, so they cannot simply live on a stack. Scheme (1975) was the first Lisp to adopt lexical scope with closures throughout.

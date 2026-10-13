@@ -2,7 +2,7 @@
 
 My LaTeX notes for CSCI-GA 2110 (Programming Languages) at NYU Courant, Fall 2026. Prof. Joseph Tassarotti teaches the lectures; Seong-Heon Jung and Vishnu Satish run the recitations.
 
-I organize them by week. Each chapter covers that week's lecture, split into sections by topic, and ends with the recitation. For recitation problems I follow the TA's posted solutions (`*-solutions.rkt`) rather than my own attempts. Sections marked (SUPPLEMENT) are extra reading, mostly from PLAI, HtDP, SICP, and TAPL.
+I organize them by week. Each chapter covers that week's lecture, split into sections by topic, and ends with the recitation. For recitation problems I follow the TA's posted solutions (`*-solutions.rkt`) rather than my own attempts.
 
 ## Files
 

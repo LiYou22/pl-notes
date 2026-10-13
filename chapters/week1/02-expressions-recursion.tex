@@ -88,11 +88,3 @@ The recursive call in \code{fact-helper} is a tail call, so the function runs in
 ---> 6
 \end{lstlisting}
 Nothing is ever pending, because \code{acc} is a finished number at every step. Since \code{fact-helper} takes two arguments and \code{fact} one, the wrapper \code{fact-tail} keeps the interface the same. Hiding the helper is a recurring theme; \Cref{sec:listsrec} does it with a named \code{let}.
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{The substitution model} The step-by-step traces above follow the \emph{substitution model} of evaluation~\cite[Section~1.1.5]{SICP}: to apply a function, evaluate its arguments, substitute the values for the parameters in the body, and continue with the body. This is a valid way to reason about a program exactly when the program is pure (\Cref{sec:scopestate}). It is also, almost literally, the first interpreter we will build in \Cref{ch:week4}, where \code{let} and function application are implemented by a function named \code{subst}.
-
-\subsubsection{Recursive process vs.\ iterative process} SICP distinguishes the \emph{procedure}, which may be recursive syntactically, from the \emph{process} it generates. \code{fact} generates a linear recursive process (stack depth $n$); \code{fact-helper} is also recursive as a procedure but generates an iterative process (constant depth). In a language with guaranteed tail calls, there is no need for special loop syntax: a loop is a tail-recursive function.
-
-\subsubsection{Tail calls in other languages} Scheme and Racket require proper tail calls, so the guarantee holds for \emph{every} tail call, not only self-calls. Many languages do not: CPython deliberately does not eliminate tail calls (the stack depth is capped at about 1000 by default), and Java and Rust do not guarantee it either. A C compiler may optimize tail calls at higher optimization levels, but the language does not promise it.

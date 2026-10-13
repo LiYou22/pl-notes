@@ -33,7 +33,7 @@ Both sides evaluate \code{e1}, substitute it for \code{x} in \code{e2}, and eval
 ---> (+ 5 5)                ---> (+ 5 5)
 ---> 10                     ---> 10
 \end{lstlisting}
-So \code{letC} is not needed in the core language: \code{parse} could turn every \code{let} into an \code{appC} of a \code{lambdaC}, and \code{eval} and \code{subst} would lose a case each. This is \emph{desugaring}, as in the supplement of \Cref{sec:calc}. The equation holds only if \code{let} and application use the same strategy, both eager or both lazy. With a lazy \code{let} and an eager call, \code{(let x (+ y y) 10)} is 10 but \code{((lambda x 10) (+ y y))} is an unbound-variable error.
+So \code{letC} is not needed in the core language: \code{parse} could turn every \code{let} into an \code{appC} of a \code{lambdaC}, and \code{eval} and \code{subst} would lose a case each. This is \emph{desugaring}. The equation holds only if \code{let} and application use the same strategy, both eager or both lazy. With a lazy \code{let} and an eager call, \code{(let x (+ y y) 10)} is 10 but \code{((lambda x 10) (+ y y))} is an unbound-variable error.
 
 \subsection{Capture, Once More}
 
@@ -91,7 +91,7 @@ It has a single computation rule, \emph{$\beta$-reduction}:
 \[
 (\lambda x.\,e)\ e_2 \;\step\; \subst{e}{e_2}{x},
 \]
-which is the \code{appC} case of the lazy interpreter: substitute the argument for the parameter. Despite having nothing but functions, the lambda calculus can express every computation: numbers, Booleans, pairs, and recursion can all be encoded as functions (supplement below). The \code{let} desugaring above is the first such encoding: a \code{let} is a $\beta$-redex.
+which is the \code{appC} case of the lazy interpreter: substitute the argument for the parameter. Despite having nothing but functions, the lambda calculus can express every computation: numbers, Booleans, pairs, and recursion can all be encoded as functions. The \code{let} desugaring above is the first such encoding: a \code{let} is a $\beta$-redex.
 
 \subsection{$\alpha$-Equivalence}
 
@@ -119,15 +119,3 @@ $\alpha$-equivalent programs must give the same answer: the names of bound varia
 \end{keypoint}
 
 The same test will expose the bug in \Cref{sec:dynscope}: renaming the inner \code{x} to \code{z} in \code{(let x 1 (let y x (let x 2 (+ y y))))} changes the answer of the first lazy environment interpreter, so that interpreter is wrong.
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Church encodings} Numbers can be represented as functions: the numeral $n$ is ``apply $f$ $n$ times'', $\bar n = \lambda f.\,\lambda x.\,f(\cdots(f\,x))$. So $\bar 2$ is \code{(lambda f (lambda x (f (f x))))}, the \code{do-twice} of week~4 with the starting value abstracted. Addition is $\lambda m.\,\lambda n.\,\lambda f.\,\lambda x.\,m\,f\,(n\,f\,x)$: do $f$ $n$ times, then $m$ more. Booleans are choosers, $\mathit{true} = \lambda t.\,\lambda f.\,t$ and $\mathit{false} = \lambda t.\,\lambda f.\,f$, so ``if'' is just application. These are not efficient, but they show that \code{numC} and \code{plusC} add convenience, not power.
-
-\subsubsection{Recursion without names} The lambda calculus has no \code{define}, so a function cannot call itself by name. Recursion is recovered with a \emph{fixed-point combinator}
-\[
-Y = \lambda f.\,(\lambda x.\,f\,(x\,x))\,(\lambda x.\,f\,(x\,x)), \qquad Y\,g =_\beta g\,(Y\,g),
-\]
-so $Y\,g$ is a fixed point of $g$: passing it a function that expects ``itself'' as an argument produces a recursive function. Under eager evaluation $Y\,g$ loops before $g$ is ever called, and the variant $Z = \lambda f.\,(\lambda x.\,f\,(\lambda v.\,x\,x\,v))\,(\lambda x.\,f\,(\lambda v.\,x\,x\,v))$, which delays $x\,x$ behind a $\lambda$, is used instead~\cite[Section~5.2]{TAPL}.
-
-\subsubsection{$\alpha$-equivalence, formally} $\alpha$-equivalence is the smallest equivalence relation, compatible with the syntax, that contains $\lambda x.\,e \equiv_\alpha \lambda y.\,\subst{e}{y}{x}$ whenever $y \notin \FV(e)$. The side condition is exactly what rules out the last row of the table above. Formal treatments identify $\alpha$-equivalent terms, which is why the textbook definition of substitution can always assume that bound names are fresh (\Cref{sec:capavoid}).

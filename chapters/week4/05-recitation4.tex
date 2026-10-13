@@ -185,38 +185,3 @@ The clause \code{(0 z)} is skipped without being evaluated, which is why the fre
 (test/exn (eval (parse '(match 7 (5 0) (6 1)))) "unmatched expression")
 \end{lstlisting}
 The last test is the run-time ``no matching clause'' error of \Cref{sec:rec3}, now in our own language. Nothing can check for it ahead of time: whether a clause matches depends on a number known only when the program runs.
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Variable patterns} Racket's \code{match} also allows a name as a pattern: it matches anything, like \code{\_}, and binds the name to the matched value. With that, \code{factorial}'s clause could read \code{(n (* n ...))}. Add it as a third kind of clause, and a clause \code{(n e)} behaves like \code{(let n v e)}, where \code{v} is the value of the scrutinee:
-\begin{lstlisting}
-(define-type PatternE
-  [numP (n : number) (e : ArithE)]
-  [anyP (e : ArithE)]
-  [varP (x : symbol) (e : ArithE)])
-
-;; new clause in get-pat-expr: substitute the scrutinee's value
-[varP (y e) (subst (numC num) y e)]
-
-;; new clause in subst-pattern: a varP clause is a binder, like letC
-[varP (y e)
-      (if (equal? x y)
-          (varP y e)
-          (let [(z (gensym))]
-            (varP z (subst erep x (subst (idC z) y e)))))]
-\end{lstlisting}
-Only the clause body is under the binder; the scrutinee is outside it, so the \code{patternC} case of \code{subst} still substitutes into the scrutinee unconditionally, as \code{letC} always substitutes into \code{e1}. Each piece is needed:
-\begin{center}
-\begin{tabular}{@{}lll@{}}
-\toprule
-program & correct & without the piece \\
-\midrule
-\code{(let y 10 (match (+ 1 2) (0 0) (n (+ n y))))} & 13 & (baseline) \\
-\code{(let n 5 (match 7 (n (* n 2))))} & 14 & no shadowing check: 10 \\
-\code{(let x n (match 3 (n x)))} & unbound & no renaming: 3 \\
-\bottomrule
-\end{tabular}
-\end{center}
-In the second program the clause's \code{n} shadows the outer one, so the \code{let} must not substitute 5 into the clause body. In the third, \code{let} substitutes lazily, so the free \code{n} would move under the clause that binds \code{n} and be captured: the \code{(let x y (let y 2 (+ x y)))} example of \Cref{sec:lazy}, with a pattern in place of the inner \code{let}. In general, \emph{every} construct that binds a name needs the same two treatments in substitution.
-
-\subsubsection{Compiling pattern matching} Real implementations do not try clauses one by one at run time. A compiler turns a \code{match} into a \emph{decision tree} or a \emph{backtracking automaton} that tests each part of the scrutinee at most once; for integer literals this becomes a jump table or a binary search. The same analysis reports unreachable clauses, like those after \code{\_} that \code{parse-patterns} silently drops, and, with types, non-exhaustive matches (\Cref{sec:rec3}).

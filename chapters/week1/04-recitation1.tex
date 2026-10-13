@@ -216,18 +216,3 @@ This is also faster: $O(n)$ instead of $O(n^2)$, since there is no \code{append}
 \begin{remark}[Tail-call \emph{elimination}]
 When a language \emph{guarantees} the optimization, it is often called tail-call elimination. Racket guarantees it; many languages, including Rust and Java, do not.
 \end{remark}
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{\code{eq?} vs.\ \code{equal?}} The handout's margin asks for the difference. \code{equal?} compares structure: two lists with equal elements are \code{equal?}. \code{eq?} compares identity: are these the very same object in memory? Symbols are \emph{interned}, so two occurrences of \code{'red} are the same object and \code{eq?} works on them, which is why \code{can-go} could use either. Lists built separately are different objects:
-\begin{lstlisting}[style=repl]
-> (eq? 'red 'red)
-#t
-> (eq? (list 1) (list 1))
-#f
-> (equal? (list 1) (list 1))
-#t
-\end{lstlisting}
-\code{eqv?} sits in between: like \code{eq?}, but also compares numbers and characters by value. Use \code{equal?} unless you specifically mean identity. (\code{next-light-iter} uses \code{eq?} on numbers; \code{=} or \code{zero?} would say what is meant more clearly.)
-
-\subsubsection{The design recipe} The EXPECTS/PRODUCES format is a light version of the design recipe of \cite{HtDP}: (1) a data definition, (2) a signature and purpose statement, (3) examples, written as tests, (4) a template that follows the data definition (one case per variant, a recursive call per self-reference), (5) the body, and (6) running the tests. Most of the recursive functions in this course are written by step~4 alone.

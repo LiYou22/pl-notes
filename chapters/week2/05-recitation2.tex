@@ -209,11 +209,3 @@ The semantic tests check the two correctness properties without writing the expe
 \begin{remark}[The handout's table]
 An earlier version of the handout listed $\neg(\neg P \land Q) \mapsto P \land Q$ as the first example. That contradicts both the code (\code{bexp-1} is built with \code{or-node}) and De Morgan's law; the posted solution corrects the row to $\neg(\neg P \lor Q) \mapsto P \land \neg Q$. Trust the definitions over the prose, and check the prose by working one example by hand.
 \end{remark}
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Negation normal form} The output shape of \code{demorgan-opt}, with negations only on variables, is called \emph{negation normal form} (NNF). It is the first step in converting a formula to conjunctive normal form (CNF), the input format of SAT solvers. NNF conversion never increases the number of $\land$/$\lor$ nodes, but the further step to CNF can blow up exponentially without tricks such as the Tseitin transformation.
-
-\subsubsection{Testing semantics exhaustively} \code{preserves-sem?} checks one assignment of truth values per test. For symbolic expressions, a stronger test enumerates every assignment to the variables (there are $2^n$ for $n$ variables) and compares the two expressions under each, which decides equivalence completely for small $n$. Random generation of expressions plus such a check is \emph{property-based testing}, available in Racket through the \code{rackcheck} package and in Haskell as QuickCheck.
-
-\subsubsection{Short-circuiting is inherited} \code{evaluate-bexp} implements $\land$ with Racket's \code{and}, which does not evaluate its second argument when the first is \code{\#f}. Our language therefore short-circuits too, without anyone deciding it should. For a pure language like bexp this is invisible, but once the language has errors or effects it matters, and an interpreter that wants strict $\land$ must evaluate both sides first, e.g.\ \rkt|(let ([v1 ...] [v2 ...]) (and v1 v2))|. This is the inheritance problem of definitional interpreters (\Cref{sec:why}).

@@ -115,15 +115,3 @@ A top-level helper with an extra argument is noise. A \emph{named \code{let}} pa
       [else (loop (rest l) (+ (first l) acc))])))
 \end{lstlisting}
 This is the idiomatic way to write a loop in Racket; it runs exactly like the helper version.
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{What a named \code{let} means} A named \code{let} is shorthand for defining a local recursive function and calling it immediately:
-\begin{lstlisting}
-(let loop ([l l] [acc 0]) body)
-;; means
-((letrec ([loop (lambda (l acc) body)]) loop) l 0)
-\end{lstlisting}
-\code{letrec} (\Cref{sec:scopestate}) is needed because \code{loop} refers to itself.
-
-\subsubsection{When the accumulator changes the answer} Turning \code{sum-list} into \code{sum-list-acc} is safe because \code{+} is associative and commutative: the accumulator adds the elements in the opposite grouping, $((0+1)+2)+3$ instead of $1+(2+(3+0))$. Do the same to \code{snoc}-based list building and the result comes out reversed, which is exactly how \code{reverse-helper} in \Cref{sec:rec1} works. \Cref{sec:hof} makes the two groupings precise as \code{foldl} and \code{foldr}.

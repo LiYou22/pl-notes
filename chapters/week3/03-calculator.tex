@@ -163,11 +163,3 @@ The last one is the worst kind of bug: no error, just a program that means somet
   \item The \code{else} of \code{case} rejects operators the language does not have, such as \code{-}.
   \item The final \code{else} rejects anything that is neither a number nor a list, such as a lone symbol.
 \end{itemize}
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Why parsing is cheap here} Real languages need a lexer and a parser, often generated from a grammar, to get from text to a tree. Lisp-family languages put that work into one generic step: the reader turns any text into nested lists of atoms, and each language then only has to interpret those lists. \cite[Chapter~2]{PLAI} uses this to skip parsing entirely. The flip side is that the s-expression \code{'(+ 1 2 3)} is perfectly well formed as data; deciding that it is not a valid \emph{calculator} program is the job of \code{parse}.
-
-\subsubsection{Homoiconicity and quasiquote} Racket code is itself written as s-expressions, so programs can build programs as data. Quasiquote makes that convenient: if \code{x} is 5, then \rkt|`(+ ,x 1)| is the list \code{'(+ 5 1)}. Everything is quoted except the parts marked with a comma, which are evaluated and spliced in; \code{,@xs} splices in the elements of a whole list. Racket macros are functions from syntax to syntax built on the same idea, which is a large part of why Racket is good at implementing languages.
-
-\subsubsection{Desugaring} The calculator has no subtraction. One way to add it without touching \code{eval} is to translate it in the parser: \code{(- a b)} becomes \code{(plusC a (timesC (numC -1) b))}. Languages are usually defined as a small \emph{core} interpreted directly plus a \emph{surface} that desugars into it~\cite[Chapter~4]{PLAI}. The core stays small enough to reason about, and the surface stays convenient.

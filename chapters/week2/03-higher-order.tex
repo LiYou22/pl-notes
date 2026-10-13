@@ -138,11 +138,3 @@ That growing pile of pending additions \emph{is} the stack: it is the concrete r
 \begin{pitfall}[Racket's \code{foldl} argument order]
 The \code{combine} of \code{my-foldl} takes \code{(acc elem)}. Racket's built-in \code{foldl} calls \code{(combine elem acc)}, element first, the opposite order. So \rkt|(foldl - 0 '(1 2 3))| in Racket is $3-(2-(1-0)) = 2$, not $-6$. Check the order before reusing a \code{combine}.
 \end{pitfall}
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Currying} \code{make-adder} is a \emph{curried} version of \code{+}: instead of taking two arguments at once it takes one and returns a function waiting for the other. Any two-argument function can be curried this way. \Cref{sec:fntypes} shows the difference in the types, and Recitation~4 uses a curried helper so it can be passed to \code{map} (\Cref{sec:rec4}).
-
-\subsubsection{The universality of \code{foldr}} Every structurally recursive function on lists that only uses the head and the result for the tail can be written as a \code{foldr}: \code{length}, \code{append}, \code{map}, \code{filter}, \code{reverse} (inefficiently), and more. In typed functional languages this is the starting point for program calculation: laws such as $\code{foldr}\ f\ b \circ \code{map}\ g = \code{foldr}\ (\lambda x\,a.\ f\,(g\,x)\,a)\ b$ let a compiler fuse two traversals into one.
-
-\subsubsection{Closures need the environment} How does \code{add2} remember \code{x}? An implementation stores, alongside the code of the \code{lambda}, the bindings of its free variables at the time the \code{lambda} was evaluated. Implementing this is a central topic of the interpreter part of the course: \Cref{ch:week4} first implements functions by substitution, and \cite[Chapters~6--7]{PLAI} replace substitution by environments and closures.

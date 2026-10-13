@@ -225,9 +225,3 @@ missing case & run-time error, only if reached & rejected before the program run
 \end{tabular}
 \end{center}
 \code{match} is more expressive. \code{type-case} is more limited, and in exchange it can check, before anything runs, that every variant is handled. Recitation~4 (\Cref{sec:rec4}) implements a small \code{match} in our own interpreter.
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{More \code{match} patterns} Racket's \code{match} has many more pattern forms~\cite[Section~12]{RacketGuide}: \rkt|(? even? n)| matches when the predicate holds and binds \code{n}; \rkt|(and p1 p2)| and \rkt|(or p1 p2)| combine patterns; \rkt|(list-rest a b rest)| names the tail; \rkt|(app f p)| matches \code{p} against \rkt|(f v)|; and a clause can carry a guard with \code{\#:when}. Repeating a pattern variable, as in \rkt|(list x x)|, requires the two parts to be \code{equal?}.
-
-\subsubsection{Exhaustiveness for richer patterns} Languages with both nested patterns and types, such as OCaml, Haskell, and Rust, get the best of both columns of the table: the compiler checks a set of nested patterns for exhaustiveness and also warns about \emph{redundant} clauses that can never match (like a clause after \code{\_}). The check is done by computing which values are not yet covered, clause by clause, and it is the same algorithm a compiler uses to turn a \code{match} into an efficient decision tree.

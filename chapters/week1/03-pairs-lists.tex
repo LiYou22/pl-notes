@@ -87,18 +87,3 @@ The empty list reversed is the empty list. Otherwise, reverse everything after t
 \end{lstlisting}
 
 This works, but \code{append} itself walks its whole left argument, and it is called once per element, so \code{my-reverse} takes $O(n^2)$ time. Racket's built-in \code{reverse} uses an accumulator instead, the same trick as \code{fact-tail}; Recitation~1 writes that version (\Cref{sec:rec1}).
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Cost model of lists} Racket lists are singly linked and immutable. \code{cons}, \code{first}, \code{rest}, and \code{empty?} take constant time. \code{length}, \code{list-ref}, and \code{append} walk the list: \rkt|(append a b)| copies every pair of \code{a} and shares \code{b} unchanged. This is why building a list at the front with \code{cons} and reversing once at the end is the standard idiom.
-
-\subsubsection{Proper and improper lists} Racket's \code{list?} checks the whole chain and is true only for proper lists, while \code{pair?} looks at one cell:
-\begin{lstlisting}[style=repl]
-> (pair? '(3 . 4))
-#t
-> (list? '(3 . 4))
-#f
-> (append '(3) 4)
-'(3 . 4)
-\end{lstlisting}
-The last one surprises people: \code{append} does not check that its \emph{last} argument is a list, so it can produce an improper list. Recitation~1's warm-up asks about exactly these cases.

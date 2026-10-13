@@ -75,11 +75,3 @@ Tree recursion is usually not made tail-recursive: with two recursive calls, at 
      (+ label (sum-bt/match left) (sum-bt/match right))]))
 \end{lstlisting}
 The pattern \rkt|(bt label left right)| matches only \code{bt} values and binds the three names to the fields in order.
-
-\subsection{(SUPPLEMENT) Further Topics}
-
-\subsubsection{Structural recursion} Functions like \code{sum-bt} are \emph{structurally recursive}: they recur only on immediate sub-parts of their input. Such functions always terminate on finite data, since each call is on a strictly smaller value, and their correctness can be proved by \emph{structural induction}, one case per variant. Every interpreter in this course is structurally recursive in its \code{eval} on the abstract syntax tree, except where substitution builds a new tree (\Cref{ch:week4}).
-
-\subsubsection{Opaque structs and abstraction} Opacity is the default for a reason: an opaque struct hides its representation, so a module can export the struct without letting clients inspect or compare its insides. Transparent structs are the right choice for plain data such as trees and syntax, where structural equality is what you want. A middle ground is \code{\#:prefab}, which also makes structs readable and writable as literals.
-
-\subsubsection{Contracts on fields} Plain Racket can check field types at run time with \code{struct/contract} or \code{contract-out}, e.g.\ requiring \code{left} to satisfy \code{(or/c empty? bt?)}. The error then points at the bad construction rather than the later traversal. \code{plai-typed} (\Cref{ch:week3}) instead checks before the program runs.
