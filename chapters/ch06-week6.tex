@@ -1,7 +1,7 @@
 \chapter{Week 6: Mutable State}
 \label{ch:week6}
 
-Lecture 6: October 13, 2026. Recitation~6 will be added after it meets.
+Lecture 6: October 13, 2026. Recitation 6: October 16, 2026.
 
 Supplementary reading:
 \begin{itemize}
@@ -15,10 +15,12 @@ Every interpreter so far has been \emph{pure}: evaluating an expression produced
   \item \Cref{sec:stateboxes}: the four new constructs, the examples, and a first attempt that cannot mutate;
   \item \Cref{sec:storepass}: store-passing style, with locations, \code{fetch}, the \tyname{Result} type, and threading the store through arithmetic, \code{let}, and application;
   \item \Cref{sec:storeboxes}: the box clauses of the store-passing interpreter, with traces showing where the environment and where the store come from;
-  \item \Cref{sec:metacirc}: the meta-circular interpreter, which implements boxes with Racket boxes, and what each version explains.
+  \item \Cref{sec:metacirc}: the meta-circular interpreter, which implements boxes with Racket boxes and functions with Racket functions, and what each version explains;
+  \item \Cref{sec:rec6}: Recitation~6 (to be added).
 \end{itemize}
 
 \input{chapters/week6/01-state-boxes}
 \input{chapters/week6/02-store-passing}
 \input{chapters/week6/03-store-boxes}
 \input{chapters/week6/04-meta-circular}
+\input{chapters/week6/05-recitation6}

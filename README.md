@@ -43,12 +43,13 @@ chapters/
     03-dynamic-scope.tex          lazy let with environments, dynamic vs. lexical scope (5b, 5c)
     04-closures.tex               lambda with environments, closures (5d, 5e)
     05-recitation5.tex            Recitation 5: environments as functions, static vs. dynamic, macros
-  ch06-week6.tex          Week 6 (lecture only so far)
+  ch06-week6.tex          Week 6
   week6/
     01-state-boxes.tex            box, unbox, set-box!, begin; a first attempt that cannot mutate
     02-store-passing.tex          locations, the store, threading it through eval
     03-store-boxes.tex            the box clauses, traces of ex4 and ex5, env vs. store
-    04-meta-circular.tex          boxes implemented with Racket boxes; what each version explains
+    04-meta-circular.tex          boxes and functions implemented with Racket's; what each version explains
+    05-recitation6.tex            Recitation 6 (placeholder)
 ```
 
 ## Building
