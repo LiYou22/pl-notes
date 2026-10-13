@@ -1,0 +1,27 @@
+\chapter{Week 5: From Substitution to Environments}
+\label{ch:week5}
+
+Lecture 5: October 6, 2026. Recitation 5: October 9, 2026.
+
+Supplementary reading:
+\begin{itemize}
+  \item \cite{PLAI} Chapter 6 (From Substitution to Environments) and Chapter 7 (Functions Anywhere), which make exactly this week's move and hit the same dynamic-scope bug on the way.
+  \item \cite{SICP} Section 3.2 (The Environment Model of Evaluation), for the same idea drawn as frames and pointers.
+  \item \cite{Scott} Chapter 3 (Names, Scopes, and Bindings), for static and dynamic scope with assignment and for macros, which Recitation~5 draws on.
+  \item \cite{TAPL} Sections 5.1--5.3 (the untyped lambda calculus), optional.
+\end{itemize}
+
+Week~4 implemented names and functions by \emph{substitution}: rewrite the program, replacing a name by its value, before running it. Lecture~5 first finishes that story, then keeps the language and changes the implementation. An \emph{environment} interpreter never rewrites the program; it carries a table from names to values and looks a name up when it reaches it. The lecture builds it in five small files, \code{lecture5a.rkt} to \code{lecture5e.rkt}, and twice the first attempt gets scope wrong in the same way. Recitation~5 revisits environments and scope, and carries the scope question over to assignment and macros. This chapter covers:
+\begin{itemize}
+  \item \Cref{sec:substrev}: \code{let} as function application, capture once more, the lambda calculus, and $\alpha$-equivalence;
+  \item \Cref{sec:env}: an environment interpreter for \code{let}, checked against substitution (\code{lecture5a.rkt});
+  \item \Cref{sec:dynscope}: lazy \code{let} with environments, dynamic scope, and the fix (\code{lecture5b.rkt}, \code{lecture5c.rkt});
+  \item \Cref{sec:closures}: functions with environments, and closures (\code{lecture5d.rkt}, \code{lecture5e.rkt});
+  \item \Cref{sec:rec5}: Recitation~5, environments as functions, one interpreter for both scopes, scope with assignment, and hygienic macros.
+\end{itemize}
+
+\input{chapters/week5/01-subst-revisited}
+\input{chapters/week5/02-environments}
+\input{chapters/week5/03-dynamic-scope}
+\input{chapters/week5/04-closures}
+\input{chapters/week5/05-recitation5}

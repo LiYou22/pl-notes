@@ -1,0 +1,128 @@
+\section{State and Boxes}
+\label{sec:stateboxes}
+
+\subsection{Four New Constructs}
+
+The starting file is ``a starting point for today's exploration of mutable state''. It takes the closure interpreter of \code{lecture5e.rkt} (\Cref{sec:closures}) and adds four constructs to \tyname{Expr}: \code{boxC} creates a box, \code{unboxC} reads its contents, \code{setboxC} updates them, and \code{seqC} is Racket's \code{(begin e1 e2)}.
+\begin{lstlisting}
+(define-type Expr
+  [numC (n : number)]
+  [plusC (e1 : Expr) (e2 : Expr)]
+  [timesC (e1 : Expr) (e2 : Expr)]
+  [letC (x : symbol) (e1 : Expr) (e2 : Expr)]
+  [lambdaC (x : symbol) (e : Expr)]
+  [appC (e1 : Expr) (e2 : Expr)]
+  [idC (x : symbol)]
+  [boxC (e : Expr)]
+  [unboxC (e : Expr)]
+  [setboxC (e1 : Expr) (e2 : Expr)]
+  [seqC (e1 : Expr) (e2 : Expr)])
+\end{lstlisting}
+The parser gets one line per construct, in the \code{case} on the head symbol, with Racket's names as the concrete syntax:
+\begin{lstlisting}
+            [(begin) (seqC (parse (second l)) (parse (third l)))]
+            [(box) (boxC (parse (second l)))]
+            [(set-box!) (setboxC (parse (second l)) (parse (third l)))]
+            [(unbox) (unboxC (parse (second l)))]
+\end{lstlisting}
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+concrete syntax & abstract syntax & meaning \\
+\midrule
+\code{(box e)} & \code{boxC} & a new box whose contents is the value of \code{e} \\
+\code{(unbox e)} & \code{unboxC} & the current contents of the box \code{e} \\
+\code{(set-box! e1 e2)} & \code{setboxC} & make the value of \code{e2} the contents of the box \code{e1} \\
+\code{(begin e1 e2)} & \code{seqC} & evaluate \code{e1}, then \code{e2}; the value is that of \code{e2} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\code{begin} takes exactly two expressions, so a longer sequence is written with nested \code{begin}s. That is all the starting file provides: \tyname{Value} is still \code{numV} and \code{closV}, and \code{eval-env} is the one of \code{lecture5e.rkt} with an \code{else} clause that reports the new variants as unimplemented. The rest of the lecture writes the four clauses, twice.
+
+\subsection{The Examples}
+
+The file ends with five test programs:
+\begin{lstlisting}
+(define ex1 (parse '(begin (+ 1 1) (+ 2 2))))
+(define ex2 (parse '(let b (box 0) (set-box! b 1))))
+(define ex3 (parse '(let b (box 0) (unbox b))))
+(define ex4 (parse '(let b (box 0) (begin (begin (set-box! b 1)
+                                                 (set-box! b (+ 1 (unbox b))))
+                                          (unbox b)))))
+
+(define ex5
+  (parse '(let a (box 1)
+            (let f (lambda x (+ x (unbox a)))
+              (begin
+                (set-box! a 2)
+                (f 10))))))
+\end{lstlisting}
+Read as Racket programs, they should give:
+\begin{itemize}
+  \item \code{ex1}: 4. The value of \code{(+ 1 1)} is computed and thrown away.
+  \item \code{ex2}: whatever \code{set-box!} returns. Racket's returns \code{(void)}; this language will return the box (\Cref{sec:storeboxes}).
+  \item \code{ex3}: 0, the initial contents.
+  \item \code{ex4}: 2. The box is set to 1, then to one more than its contents, and read.
+  \item \code{ex5}: 12. This is the interesting one. The closure \code{f} is created while \code{a} holds 1, and called after \code{a} has been set to 2. The closure saved its environment (\Cref{sec:closures}), yet \code{(unbox a)} in its body must see the \emph{new} contents, so $10 + 2 = 12$. Racket itself gives 12 for the same program.
+\end{itemize}
+
+\subsection{Attempt 1: A Box Holds Its Value}
+
+The obvious first try: a box value simply contains the value it holds.
+\begin{lstlisting}
+(define-type Value
+  [numV (n : number)]
+  [closV (env : Env) (x : symbol) (e : Expr)]
+  [boxV (v : Value)])
+
+    [boxC (e) (boxV (eval-env env e))]
+    [unboxC (e) (boxV-v (eval-env env e))]
+    [setboxC (e1 e2)
+             (let ([v (eval-env env e1)])
+               (boxV (eval-env env e2)))]
+    [seqC (e1 e2)
+          (let ([v (eval-env env e1)])
+            (eval-env env e2))]
+\end{lstlisting}
+\code{boxC} and \code{unboxC} are fine: wrap the value, unwrap it. The trouble is \code{setboxC}. It evaluates the box \code{e1} into \code{v}, and then there is nothing to do with \code{v}: a \code{boxV} is an immutable piece of data, so the only option is to build a \emph{new} \code{boxV} holding the new value. \code{seqC} evaluates \code{e1}, ignores the result, and evaluates \code{e2}. On the examples:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+& Attempt 1 & expected \\
+\midrule
+\code{ex1} & \code{(numV 4)} & 4 \\
+\code{ex2} & \code{(boxV (numV 1))} & the box, now holding 1 \\
+\code{ex3} & \code{(numV 0)} & 0 \\
+\code{ex4} & \textcolor{sigc}{\code{(numV 0)}} & 2 \\
+\code{ex5} & \textcolor{sigc}{\code{(numV 11)}} & 12 \\
+\bottomrule
+\end{tabular}
+\end{center}
+In \code{ex4}, each \code{set-box!} builds a new box that the enclosing \code{begin} throws away, while the environment still binds \code{b} to the original \code{(boxV (numV 0))} (\Cref{fig:attempt1}). The final \code{(unbox b)} reads that box and gets 0. In \code{ex5}, \code{f}'s saved environment binds \code{a} to \code{(boxV (numV 1))} forever, so the call gives 11.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+  \node[cell, fill=greybg, minimum width=10mm] (b) at (0,0) {b};
+  \node[lbl, above=1mm of b] {env};
+  \node[cell, fill=tsk, minimum width=30mm] (v0) at (3.4,0) {(boxV (numV 0))};
+  \draw[ptr] (b) -- (v0);
+  \node[lbl, right=2mm of v0, align=left] {what every \code{(unbox b)} reads};
+  \node[cell, fill=kspace, minimum width=30mm] (v1) at (3.4,-1.2) {(boxV (numV 1))};
+  \node[lbl, right=2mm of v1, align=left] {built by \code{(set-box! b 1)},\\ then dropped by \code{begin}};
+  \node[cell, fill=kspace, minimum width=30mm] (v2) at (3.4,-2.4) {(boxV (numV 1))};
+  \node[lbl, right=2mm of v2, align=left] {built by \code{(set-box! b (+ 1 (unbox b)))},\\ also dropped};
+\end{tikzpicture}
+\caption{Attempt 1 on \code{ex4}. Nothing points to the boxes that \code{set-box!} builds; the name \code{b} still refers to the original, unchanged box. The second one holds 1 because \code{(unbox b)} still reads 0.}
+\label{fig:attempt1}
+\end{figure}
+
+\begin{pitfall}[\code{ex2} looks right]
+\code{(eval ex2)} is \code{(boxV (numV 1))}, exactly what a working \code{set-box!} would return, and \code{(unbox (set-box! (box 0) 7))} gives \code{(numV 7)}. The new contents are visible through the \emph{return value} of \code{set-box!}, never through the name of the box. That is functional update, like \code{cons} building a new list, not mutation. A test of mutation has to read the box again through another path afterwards, as \code{ex4} and \code{ex5} do.
+\end{pitfall}
+
+The same failure shows up whenever two parts of a program hold the same box. In \code{(let a (box 0) (let b a (begin (set-box! b 3) (unbox a))))}, \code{a} and \code{b} name one box, so the answer should be 3; Attempt 1 gives \code{(numV 0)}. A binding in the environment holds a \emph{copy} of a value, and values are immutable, so a box cannot be a value that contains its contents.
+
+\begin{keypoint}[Mutation needs a level of indirection]
+For a change made through one reference to be seen through another, both must refer to a shared place that holds the contents, rather than contain the contents themselves. The box value must say \emph{where} its contents are, and the contents must be kept somewhere that every part of the evaluation can see and that can change over time.
+\end{keypoint}

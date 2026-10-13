@@ -36,6 +36,19 @@ chapters/
     03-capture-avoiding.tex       capture-avoiding substitution with gensym
     04-lambda.tex                 adding functions
     05-recitation4.tex            Recitation 4: adding match to the interpreter
+  ch05-week5.tex          Week 5
+  week5/
+    01-subst-revisited.tex        let as application, capture, lambda calculus, alpha equivalence
+    02-environments.tex           an environment interpreter for let (lecture5a)
+    03-dynamic-scope.tex          lazy let with environments, dynamic vs. lexical scope (5b, 5c)
+    04-closures.tex               lambda with environments, closures (5d, 5e)
+    05-recitation5.tex            Recitation 5: environments as functions, static vs. dynamic, macros
+  ch06-week6.tex          Week 6 (lecture only so far)
+  week6/
+    01-state-boxes.tex            box, unbox, set-box!, begin; a first attempt that cannot mutate
+    02-store-passing.tex          locations, the store, threading it through eval
+    03-store-boxes.tex            the box clauses, traces of ex4 and ex5, env vs. store
+    04-meta-circular.tex          boxes implemented with Racket boxes; what each version explains
 ```
 
 ## Building
@@ -46,4 +59,4 @@ latexmk -pdf main.tex
 
 For a new week, add `chapters/chNN-weekN.tex` with a `weekN/` folder next to it, and `\include` it in `main.tex`.
 
-The same code, runnable and with tests, is in the scribble notes under `../lectures/` and `../recitation/`.
+The lecture code is in `../lectures/`. Recitations 3 and 4 also have runnable scribble notes with tests in `../recitation/`.

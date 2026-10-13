@@ -1,0 +1,188 @@
+\section{Functions with Environments: Closures}
+\label{sec:closures}
+
+\code{lecture5d.rkt} and \code{lecture5e.rkt} add \code{lambda} to the environment interpreter, back with an eager \code{let}. As the file puts it, ``once again we'll first do something that behaves `incorrectly' (or at least counter-intuitively) and then we'll switch to a fixed version'': the first attempt has dynamic scope, and the fix is the one of \Cref{sec:dynscope}.
+
+\subsection{Attempt 1: A Function Is Its Parameter and Body}
+
+\tyname{Expr} gets \code{lambdaC} and \code{appC} back, \code{parse} is the week~4 one (a list whose head is not a keyword is an application), and the result type is the \tyname{Value} of week~4, with function values written \code{lambdaV}. A binding holds a \tyname{Value}:
+\begin{lstlisting}
+(define-type Value
+  [numV (n : number)]
+  [lambdaV (x : symbol) (e : Expr)])
+
+(define-type Binding
+  [bind (name : symbol) (val : Value)])
+;; Env, empty-env, extend-env, lookup: as in lecture5a, returning a Value
+
+(define (eval-env (env : Env) (e : Expr)) : Value
+  (type-case Expr e
+    [numC (n) (numV n)]
+    [lambdaC (x e) (lambdaV x e)]
+    [plusC (e1 e2) (numV (+ (numV-n (eval-env env e1)) (numV-n (eval-env env e2))))]
+    [timesC (e1 e2) (numV (* (numV-n (eval-env env e1)) (numV-n (eval-env env e2))))]
+    [letC (x e1 e2)
+          (let ([v1 (eval-env env e1)])
+            (eval-env (extend-env (bind x v1) env) e2))]
+    [appC (e1 e2)
+          (let [(v1 (eval-env env e1))
+                (v2 (eval-env env e2))]
+            (eval-env (extend-env (bind (lambdaV-x v1) v2) env) (lambdaV-e v1)))]
+    [idC (x) (lookup x env)]))
+
+(define (eval (e : Expr))
+  (eval-env empty-env e))
+\end{lstlisting}
+\code{+} and \code{*} unwrap their operands with \code{numV-n} directly, and \code{appC} takes the function apart with \code{lambdaV-x} and \code{lambdaV-e}, so adding a function or applying a number fails inside an accessor rather than with a custom message. A call evaluates the function and the argument (eager), then evaluates the body in \code{env} extended with \code{x=v2}: it is the \code{letC} clause with the body taken from the function value. The four \code{let} programs of \Cref{sec:envcheck} still give 37, 11, 12, 20, now as \code{numV}s, and simple functions work:
+\begin{lstlisting}[style=repl]
+> (eval (parse '((lambda x (+ 2 x)) 1)))
+(numV 3)
+> (eval (parse '(let x 2 (let addx (lambda y (+ y x)) (addx 3)))))
+(numV 5)
+\end{lstlisting}
+``But now\ldots'' \code{env} in the \code{appC} clause is the environment of the \emph{call}. If the caller has rebound a name that the body uses freely, the body sees the caller's binding:
+\begin{lstlisting}[style=repl]
+(let x 2
+  (let addx (lambda y (+ y x))
+    (let x 5
+      (addx 3))))
+  env at the call:   [x=5, addx=(lambdaV y (+ y x)), x=2]
+  body (+ y x) in    [y=3, x=5, addx=..., x=2]
+    y ---> 3,  x ---> 5   (the caller's x)
+---> 8
+\end{lstlisting}
+Lexically, the \code{x} in \code{addx}'s body is the \code{x=2} around the \code{lambda}, so the answer should be 5 (\Cref{fig:addx}). ``Oops, we have the same problem of dynamic scope!'' And for the same reason as \code{eval-env1}: the function body is stored code, and it is run in the environment where it is used.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[tok/.style={inner sep=0pt, font=\ttfamily\normalsize, anchor=base west}]
+  \node[tok] at (0,0) {(let x 2 (let addx (lambda y (+ y x)) (let x 5 (addx 3))))};
+  \node[tok] (ox) at (5\cw,0) {\phantom{x}};
+  \node[tok] (ux) at (34\cw,0) {\phantom{x}};
+  \node[tok] (ix) at (43\cw,0) {\phantom{x}};
+  \draw[bind] (ux.south) to[out=-120, in=-60] (ox.south);
+  \draw[bad] (ux.north) to[out=60, in=120] (ix.north);
+  \node[lbl, text=accent] at (19\cw,-1.9) {lexical (\code{lecture5e}): the \code{x} around the \code{lambda}, so 5};
+  \node[lbl, text=sigc] at (38.5\cw,0.8) {dynamic (\code{lecture5d}): the caller's \code{x}, so 8};
+\end{tikzpicture}
+\caption{The free \code{x} in \code{addx}'s body. Without closures, the body is evaluated in the caller's environment and finds the inner \code{x}.}
+\label{fig:addx}
+\end{figure}
+
+This is also the week~4 eager-capture bug in a new form. In \Cref{sec:eagerapp}, \code{(let f (lambda x (+ x y)) (let y 6 (f 1)))} gave 7 under capturing substitution, because the free \code{y} of \code{f} met the \code{y=6} at the call. \code{lecture5d}'s \code{eval} gives 7 for it too. Capture in a substitution interpreter and dynamic scope in an environment interpreter are the same mistake.
+
+\subsection{Attempt 2: Closures}
+
+The fix is the one of \Cref{sec:dynscope}: save the environment where the code was written, here where the \code{lambda} was evaluated, together with the code.
+
+\begin{definition}[Closure]
+A \emph{closure} is a function value consisting of the parameter, the body, and the environment in which the \code{lambda} expression was evaluated. Calling it evaluates the body in that saved environment, extended with the parameter.
+\end{definition}
+\code{lecture5e.rkt} replaces \code{lambdaV} by \code{closV} and changes two clauses of \code{eval-env}; everything else is \code{lecture5d.rkt} unchanged:
+\begin{lstlisting}
+(define-type Value
+  [numV (n : number)]
+  [closV (env : Env) (x : symbol) (e : Expr)])
+
+    [lambdaC (x e) (closV env x e)]
+    ...
+    [appC (e1 e2)
+          (let [(v1 (eval-env env e1))
+                (v2 (eval-env env e2))]
+            ; run the body in the closure's saved env, not the current one
+            (eval-env (extend-env (bind (closV-x v1) v2) (closV-env v1)) (closV-e v1)))]
+\end{lstlisting}
+\code{lambdaC} captures the current \code{env} in the closure. \code{appC} extends \code{(closV-env v1)}, the saved environment, instead of \code{env}, the caller's. \tyname{Value} and \tyname{Env} now refer to each other, as \tyname{Binding} and \tyname{Env} did in \code{lecture5c.rkt}. (\code{val->expr} is gone: nothing is substituted any more, so values never have to turn back into expressions.)
+
+The file reruns the \code{addx} example with the inner \code{x} changed to 6 (dynamic scope would give 9):
+\begin{lstlisting}[style=repl]
+(let x 2
+  (let addx (lambda y (+ y x))
+    (let x 6
+      (addx 3))))
+  evaluating the lambda in [x=2]  ---> addx = (closV [x=2] y (+ y x))
+  env at the call:   [x=6, addx, x=2]          (not used for the body)
+  body (+ y x) in    [y=3, x=2]                (the closure's env + y=3)
+    y ---> 3,  x ---> 2
+---> 5
+\end{lstlisting}
+``It gives 5, as we'd expect with lexical scope.'' The closure carries its own environment, shown in \Cref{fig:closure}. Whatever the caller binds, the body sees only the bindings that were in scope where the \code{lambda} was written, plus its parameter. The week~4 example \code{(let f (lambda x (+ x y)) (let y 6 (f 1)))} is now \code{No binding found}, as it should be.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm]
+  \node[cell, fill=tsk, minimum width=14mm] (cenv) at (0,0) {env};
+  \node[cell, fill=tsk, minimum width=8mm, right=0pt of cenv] (cx) {y};
+  \node[cell, fill=tsk, minimum width=22mm, right=0pt of cx] (ce) {(+ y x)};
+  \node[lbl, above=1mm of cx] {\code{addx} = \code{closV}};
+  \node[cell, fill=uspace, minimum width=12mm] (b2) at (0,-1.6) {x=2};
+  \node[right=2mm of b2, lbl] (nil) {\code{[]}};
+  \draw[ptr] (b2) -- (nil);
+  \draw[ptr] (cenv.center) -- (b2.north);
+  \node[lbl, left=2mm of b2, align=right, text=accent] {saved when the\\ \code{lambda} was evaluated};
+
+  \node[cell, fill=kspace, minimum width=12mm] (k1) at (6.4,-1.6) {x=6};
+  \node[cell, fill=greybg, minimum width=14mm, right=3mm of k1] (k2) {addx};
+  \node[cell, fill=uspace, minimum width=12mm, right=3mm of k2] (k3) {x=2};
+  \draw[ptr] (k1) -- (k2); \draw[ptr] (k2) -- (k3);
+  \node[lbl, below=1mm of k2] {caller's env at \code{(addx 3)}: ignored for the body};
+
+  \node[cell, fill=kspace, minimum width=12mm] (y3) at (0,-3.2) {y=3};
+  \draw[ptr] (y3) -- (b2);
+  \node[lbl, right=2mm of y3, align=left] {body env = saved env + parameter:\\ \code{x} is found as 2};
+\end{tikzpicture}
+\caption{The closure for \code{addx} and the environments of the call \code{(addx 3)}. The body is evaluated in the closure's environment extended with \code{y=3}; the caller's \code{x=6} is never consulted.}
+\label{fig:closure}
+\end{figure}
+
+\begin{keypoint}[Closures]
+A function value must remember the environment in which it was created. This is not an optimization or a detail of this interpreter: it is the definition of lexical scope for first-class functions, and it is why \code{make-adder} in \Cref{sec:hof} returns a function that still knows its \code{x} after \code{make-adder} has returned.
+\end{keypoint}
+
+\subsection{The Five Files Side by Side}
+
+Each file is a small change to the previous one, alternating between a first attempt that gets scope wrong and a fix:
+\begin{center}
+\begin{tabular}{@{}llll@{}}
+\toprule
+file & what is added & what a binding stores & scope \\
+\midrule
+\code{lecture5a} & environments, eager \code{let}, numbers only & a number & lexical \\
+\code{lecture5b} & lazy \code{let}, attempt 1 & an unevaluated expression & \textcolor{sigc}{dynamic} \\
+\code{lecture5c} & lazy \code{let}, attempt 2 & an expression \emph{and its env} & lexical \\
+\code{lecture5d} & \code{lambda}, attempt 1 & a value; functions are \code{lambdaV} & \textcolor{sigc}{dynamic} \\
+\code{lecture5e} & \code{lambda}, attempt 2 & a value; functions are closures & lexical \\
+\bottomrule
+\end{tabular}
+\end{center}
+The two red rows fail for the same reason and are fixed the same way: some code is run in the environment where it is used instead of the environment where it was written. On the programs of this chapter:
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+& substitution & \code{eval1} & \code{eval2} & \code{eval} & \code{eval} \\
+& (week 4) & (5b) & (5c) & (5d) & (5e) \\
+\midrule
+\code{(let x 5 (let x 6 (+ x x)))} & 12 & 12 & 12 & 12 & 12 \\
+\code{(let x 1 (let y x (let x 2 (+ y y))))} & 2 & \textcolor{sigc}{4} & 2 & 2 & 2 \\
+\code{(let x y (let y 2 (+ x x)))} & error & \textcolor{sigc}{4} & error & error & error \\
+\code{(let x (+ y y) 10)} & error & 10 & 10 & error & error \\
+\code{addx} example & 5 & --- & --- & \textcolor{sigc}{8} & 5 \\
+\code{(let f (lambda x (+ x y)) (let y 6 (f 1)))} & error & --- & --- & \textcolor{sigc}{7} & error \\
+\bottomrule
+\end{tabular}
+\end{center}
+The substitution column is the capture-avoiding eager interpreter \code{eval-eager-v3} (\Cref{sec:eagerapp}). Red entries disagree with it for scope reasons; ``---'' means the file has no \code{lambda}. The row \code{(let x (+ y y) 10)} is not a scope difference but the eager/lazy one of \Cref{sec:lazy}: lazy interpreters never evaluate an unused \code{e1}.
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{Closures in other languages} Every language with first-class functions and lexical scope builds closures: JavaScript, Python, Java lambdas, C++ lambdas (which make the capture list explicit, \code{[x]} or \code{[\&x]}), Rust closures. C function pointers are not closures; C code passes a separate \code{void *} ``context'' argument to fake one. A well-known Python surprise comes from closures capturing \emph{variables} rather than values:
+\begin{lstlisting}[language={}]
+fs = [lambda: i for i in range(3)]
+[f() for f in fs]        # [2, 2, 2], not [0, 1, 2]
+\end{lstlisting}
+All three closures share the loop's single variable \code{i}, which holds 2 when they are called. In our interpreter variables are immutable, so the difference between capturing a variable and capturing its value cannot be observed; it appears once mutation is added~\cite[Chapter~8]{PLAI}.
+
+\subsubsection{Representing closures} \code{closV} saves the \emph{entire} environment, which keeps every binding in scope alive as long as the closure lives. Compilers instead build \emph{flat closures} that copy only the free variables of the body: for \code{addx}, just \code{x}. Because a closure can outlive the call that created it (returned from \code{make-adder}, stored in a list), its environment must live on the heap, not the stack; this is the ``upward funarg'' of \Cref{sec:dynscope}.
+
+\subsubsection{Recursion needs a cycle} \code{(let fact (lambda n ... (fact (- n 1)) ...) ...)} does not work in \code{lecture5e.rkt}: the closure for \code{fact} saves the environment of the \code{let}, which does not yet contain \code{fact}. A recursive function's closure must contain an environment that contains the closure itself, a cycle. Building it needs either mutation (create the binding first, then fill it in) or a fixed-point trick, which is what \code{letrec} provides~\cite[Chapter~9]{PLAI}.

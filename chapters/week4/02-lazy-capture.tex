@@ -112,7 +112,7 @@ lazy:
 The two programs differ only in renaming the inner \code{y} to \code{z}, so they must mean the same thing. Yet lazy substitution gives 4 for one and an error for the other. This bug is called \emph{variable capture}, and a substitution that can cause it is \emph{capturing}.
 \end{keypoint}
 
-Eager substitution never has this problem: it only ever substitutes numbers, and a number contains no names to capture. Lazy substitution substitutes whole expressions, which can contain free variables.
+\code{eval-eager} does not have this problem: it only ever substitutes numbers, and a number contains no names to capture. Lazy substitution substitutes whole expressions, which can contain free variables. (Once values can be functions, eager evaluation substitutes code too, and capture returns; see \Cref{sec:eagerapp}.)
 
 \subsection{(SUPPLEMENT) Further Topics}
 

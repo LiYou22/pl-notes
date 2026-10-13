@@ -1,0 +1,219 @@
+\section{Environments}
+\label{sec:env}
+
+\subsection{The Plan}
+
+Every interpreter since \Cref{sec:letsubst} has had to answer one question: in
+\begin{lstlisting}
+(let x 5 (+ x x))
+\end{lstlisting}
+when \code{eval} reaches the \code{x} in \code{(+ x x)}, where does the 5 come from? There are two answers (\Cref{fig:twoways}).
+\begin{itemize}
+  \item \textbf{Substitution} (week~4). Before evaluating the body, rewrite it: replace every \code{x} by the value. The body becomes \code{(+ 5 5)}, which contains no names at all, so evaluating it never has to ask about \code{x}.
+  \item \textbf{Environments} (this week). Leave the body exactly as written. Evaluate it together with a table, the \emph{environment}, that says \code{x = 5}. When evaluation reaches \code{x}, look it up in the table.
+\end{itemize}
+Both give 10. \code{lecture5a.rkt} goes back to the simplest language with names, numbers and eager \code{let}, and implements it the second way. The rest of the week is about making the second answer agree with the first in \emph{every} program, not just this one.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+  \node[box, fill=uspace, font=\ttfamily] (p) at (0,0) {(let x 5 (+ x x))};
+  \node[box, fill=kspace, font=\ttfamily] (s1) at (-3.2,-2) {(+ 5 5)};
+  \node[box, fill=tsk] (s2) at (-3.2,-3.4) {10};
+  \node[box, fill=kspace, font=\ttfamily] (e1) at (3.2,-2) {(+ x x)};
+  \node[box, fill=greybg, font=\ttfamily\small, right=3mm of e1] (tab) {env: [x=5]};
+  \node[box, fill=tsk] (e2) at (3.2,-3.4) {10};
+  \draw[arr] (p.south west) ++(4mm,0) -- (s1.north);
+  \draw[arr] (p.south east) ++(-4mm,0) -- (e1.north);
+  \node[lbl, align=right, anchor=east] at (-2.65,-0.7) {rewrite the body:\\ \code{(subst 5 'x (+ x x))}};
+  \node[lbl, align=left, anchor=west] at (2.65,-0.7) {keep the body,\\ add \code{x=5} to the env};
+  \draw[arr] (s1) -- node[left, lbl] {evaluate} (s2);
+  \draw[arr] (e1) -- node[right, lbl] {evaluate, looking \code{x} up} (e2);
+  \draw[densely dotted] (e1) -- (tab);
+  \node[lbl, below=1mm of s2] {substitution (week 4)};
+  \node[lbl, below=1mm of e2] {environment (this week)};
+\end{tikzpicture}
+\caption{Two implementations of the same \code{let}. Substitution changes the program; an environment changes only what \code{eval} carries along.}
+\label{fig:twoways}
+\end{figure}
+
+The lecture files call the expression type \tyname{Expr} rather than \tyname{ArithE}; the variants are the same. \code{lecture5a.rkt} drops \code{lambdaC} and \code{appC} again, so its only values are numbers and \code{eval} returns a \code{number}:
+\begin{lstlisting}
+(define-type Expr
+  [numC (n : number)]
+  [plusC (e1 : Expr) (e2 : Expr)]
+  [timesC (e1 : Expr) (e2 : Expr)]
+  [letC (x : symbol) (e1 : Expr) (e2 : Expr)]
+  [idC (x : symbol)])
+\end{lstlisting}
+
+\subsection{The Data Structure}
+
+\begin{definition}[Environment]
+An \emph{environment} is a mapping from names to values. Here it is a list of \emph{bindings}, newest first; looking a name up returns the value of the \emph{first} binding with that name.
+\end{definition}
+\begin{lstlisting}
+(define-type Binding
+  [bind (name : symbol) (val : number)])
+
+(define-type-alias Env (listof Binding))
+(define empty-env empty)
+(define extend-env cons)
+
+(define (lookup (x : symbol) (env : Env)) : number
+  (cond
+    [(cons? env)
+     (if (equal? (bind-name (first env)) x)
+         (bind-val (first env))
+         (lookup x (rest env)))]
+    [else (error 'lookup "No binding found")]))
+\end{lstlisting}
+Three small pieces of \code{plai-typed} appear here:
+\begin{itemize}
+  \item \code{define-type-alias} gives a type a second name. \tyname{Env} \emph{is} \code{(listof Binding)}; writing \tyname{Env} only documents intent.
+  \item \rkt|(define extend-env cons)| names an existing function. Adding a binding is consing it onto the front: \rkt|(extend-env (bind 'x 5) env)|.
+  \item \code{lookup} is ordinary list recursion, the shape of \code{my-reverse} in \Cref{sec:lists}: an empty case (no binding, an error) and a \code{cons} case (check the first binding, else recur on the rest).
+\end{itemize}
+
+\subsection{The Interpreter}
+
+\code{eval-env} takes the environment as an extra argument, and \code{eval} starts it with the empty one:
+\begin{lstlisting}
+(define (eval-env (env : Env) (e : Expr)) : number
+  (type-case Expr e
+    [numC (n) n]
+    [plusC (e1 e2) (+ (eval-env env e1) (eval-env env e2))]
+    [timesC (e1 e2) (* (eval-env env e1) (eval-env env e2))]
+    [idC (x) (lookup x env)]
+    [letC (x e1 e2)
+          (let ([v1 (eval-env env e1)])
+            (eval-env (extend-env (bind x v1) env) e2))]))
+
+(define (eval (e : Expr)) : number
+  (eval-env empty-env e))
+\end{lstlisting}
+Compare it with \code{eval-eager} of \Cref{sec:letsubst} clause by clause:
+\begin{center}
+\begin{tabular}{@{}p{0.12\linewidth}p{0.4\linewidth}p{0.4\linewidth}@{}}
+\toprule
+case & substitution & environment \\
+\midrule
+\code{letC} & evaluate \code{e1}, \emph{rewrite} \code{e2} with \code{subst}, evaluate the new tree & evaluate \code{e1}, \emph{extend the env} with \code{x=v1}, evaluate the unchanged \code{e2} \\
+\code{idC} & never reached for a bound name, so it is an error & \code{lookup} \\
+others & recurse & recurse, passing \code{env} along unchanged \\
+\bottomrule
+\end{tabular}
+\end{center}
+The \code{idC} row is the heart of the change. In the substitution interpreter, reaching a name means it was never bound. In \code{eval-env}, reaching a name is the normal case, and the table answers it.
+
+\subsection{Traces}
+
+Write the environment next to each step. \code{eval} starts with \code{[]}:
+\begin{lstlisting}[style=repl]
+(let x 5 (+ x x))                   env = []
+  evaluate 5                        ---> 5
+  evaluate (+ x x)                  env = [x=5]
+    x ---> 5,  x ---> 5
+---> 10
+\end{lstlisting}
+
+\paragraph{Shadowing comes for free.} The new binding goes on the front, and \code{lookup} returns the first match, so an inner binding hides an outer one of the same name (\Cref{fig:envstack}). This is the comment \code{(+ x x) ---- '((bind x 6) (bind x 5))} from lecture:
+\begin{lstlisting}[style=repl]
+(let x 5 (let x 6 (+ x x)))         env = []
+  evaluate 5                        ---> 5
+  (let x 6 (+ x x))                 env = [x=5]
+    evaluate 6                      ---> 6
+    (+ x x)                         env = [x=6, x=5]
+      x ---> 6 (first match),  x ---> 6
+---> 12
+\end{lstlisting}
+Substitution needed the \rkt|(equal? x y)| test in \code{subst-eager} to get this right (\Cref{sec:letsubst}); here there is no special case at all.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm]
+  \foreach \i/\lab/\env in {0/{evaluating \code{5}}/{}, 1/{evaluating \code{6}}/{x5}, 2/{evaluating \code{(+ x x)}}/{x6x5}} {
+    \node[lbl, anchor=west] at (-0.2, -\i*1.1) {\lab};
+  }
+  \node[cell, fill=greybg, minimum width=10mm] at (4.2,0) {[]};
+  \node[cell, fill=uspace, minimum width=12mm] (a1) at (4.2,-1.1) {x=5};
+  \node[cell, fill=kspace, minimum width=12mm] (b1) at (4.2,-2.2) {x=6};
+  \node[cell, fill=uspace, minimum width=12mm, right=4mm of b1] (b2) {x=5};
+  \draw[ptr] (b1) -- (b2);
+  \draw[ptr, accent] (4.2,-2.95) node[below, lbl, text=accent] {\code{lookup 'x} stops here} -- (b1.south);
+\end{tikzpicture}
+\caption{The environment while evaluating \code{(let x 5 (let x 6 (+ x x)))}. Each \code{let} pushes a binding on the front; \code{lookup} scans from the front, so the newest \code{x} wins.}
+\label{fig:envstack}
+\end{figure}
+
+\paragraph{Scope comes from passing the env down.} \code{eval-env} passes the extended environment only \emph{into} the body of the \code{let}; it never returns it. So a binding is visible exactly inside its own body. The lecture's example is \code{(+ (let x 5 (+ 3 x)) e2)}:
+\begin{lstlisting}[style=repl]
+(+ (let x 5 (+ 3 x)) x)             env = []
+  left:  (let x 5 (+ 3 x))          env = []
+           (+ 3 x)                  env = [x=5]   ---> 8
+  right: x                          env = []      ---> lookup: No binding found
+\end{lstlisting}
+The \code{x=5} binding existed only during the left operand. When the right operand is evaluated, \code{plusC} uses its own \code{env}, which never contained \code{x}. This matches lexical scope: the second \code{x} is not inside the \code{let}.
+
+\subsection{A Default Environment}
+
+Starting from a non-empty environment gives the language predefined names for free:
+\begin{lstlisting}
+(define default-env : Env
+  (extend-env (bind 'pi 3.14159) (extend-env (bind 'e 2.71828) empty-env)))
+
+(define (eval-default-env (e : Expr)) : number
+  (eval-env default-env e))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+> (eval-default-env (parse '(let r 10 (* pi (* r r)))))
+- number
+314.159
+\end{lstlisting}
+A program may still shadow them: \code{(let pi 3 pi)} is 3. The substitution interpreter has no natural place for such names; it would have to wrap every program in \code{(let pi 3.14159 ...)}. Real languages work like \code{default-env}: Racket's \code{+}, \code{map}, and \code{first} are bindings in the initial environment.
+
+\subsection{Checking Against Substitution}
+\label{sec:envcheck}
+
+\code{lecture5a.rkt} ends with ``our old substitution evaluator for comparison'', the eager interpreter of \Cref{sec:letsubst} under new names:
+\begin{lstlisting}
+(define (eval-subst (e : Expr)) : number
+  (type-case Expr e
+    [numC (n) n]
+    [plusC (e1 e2) (+ (eval-subst e1) (eval-subst e2))]
+    [timesC (e1 e2) (* (eval-subst e1) (eval-subst e2))]
+    [letC (x e1 e2)
+          (let ([v1 (eval-subst e1)])
+            (eval-subst (subst v1 x e2)))]
+    [idC (x) (error 'eval-subst "unbound variable!")]))
+\end{lstlisting}
+where \code{subst} is \code{subst-eager}. Both interpreters are run on the same four programs:
+\begin{center}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+program & \code{eval-subst} & \code{eval} \\
+\midrule
+\code{(+ 27 (let x 5 (+ x x)))} & 37 & 37 \\
+\code{(let x 5 (let y 6 (+ x y)))} & 11 & 11 \\
+\code{(let x 5 (let x 6 (+ x x)))} & 12 & 12 \\
+\code{(let x 5 (let x (* x 2) (+ x x)))} & 20 & 20 \\
+\bottomrule
+\end{tabular}
+\end{center}
+The last program checks that \code{e1} is evaluated in the \emph{outer} environment: \code{(* x 2)} sees \code{x=5}, and only then is \code{x=10} pushed for the body.
+
+\begin{keypoint}[Environment vs.\ substitution, for \code{let}]
+For this language the two interpreters always agree: each binding in \code{env} is a substitution that has been \emph{postponed} until the name is actually reached. Instead of copying 5 into every \code{x} of the body up front, \code{eval-env} remembers \code{x=5} and fills it in on demand. Substitution is the reference: whenever a later environment interpreter disagrees with it, the environment interpreter has a scope bug. That is how the lecture finds both bugs of \Cref{sec:dynscope,sec:closures}.
+\end{keypoint}
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{Why have two implementations at all?} Substitution is the \emph{specification}: it is short, follows the mathematical definition of the language, and is easy to reason about by rewriting, as in every trace of week~4. Environments are the \emph{implementation}: no real interpreter or compiler copies function bodies to fill in arguments. Having both and checking that they agree is a standard technique; the agreement is what makes the fast version trustworthy.
+
+\subsubsection{The correspondence, precisely} For a closed expression $e$, \code{(eval e)} equals \code{(eval-subst e)}. The proof generalizes the statement to any environment $\rho = [x_1{=}v_1, \ldots, x_n{=}v_n]$: evaluating $e$ in $\rho$ gives the same result as evaluating $e$ with the bindings of $\rho$ substituted in, oldest first so that newer bindings win. Then it goes by induction on the evaluation. This is the sense in which an environment is ``substitution, delayed''~\cite[Chapter~6]{PLAI}.
+
+\subsubsection{Frames} These notes write an environment newest-first as \code{[x=6, x=5]}; the code represents it as the list \rkt|(list (bind 'x 6) (bind 'x 5))|. SICP draws the same structure as a chain of \emph{frames}, each pointing to the enclosing one~\cite[Section~3.2]{SICP}.
+
+\subsubsection{Lookup cost} A list environment makes \code{lookup} linear in the number of bindings in scope. Since the program text determines \emph{which} binding each use refers to (lexical scope), a compiler can compute, before running, how far back in the environment each name is: its \emph{lexical address}. Lookup then becomes indexing, with no name comparisons. This is the de Bruijn index idea of the week~4 supplement (\Cref{sec:capavoid}) put to practical use, and it is how most compiled languages turn local variables into stack-frame offsets.
+
+\subsubsection{Environments as functions} An environment only needs to support lookup and extension, so it can also be represented as a function from names to values. Recitation~5 does exactly this (\Cref{sec:rec5}); the interpreter does not change. Choosing a representation behind a small interface like \code{lookup}/\code{extend-env} is what makes such swaps cheap.

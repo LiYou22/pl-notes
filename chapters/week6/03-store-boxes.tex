@@ -1,0 +1,145 @@
+\section{Boxes in the Store-Passing Interpreter}
+\label{sec:storeboxes}
+
+\subsection{The Box Clauses}
+
+With the store in place, the four new clauses are short. \code{boxC} evaluates the initial contents, takes a fresh location, and adds a cell for it; \code{unboxC} evaluates the box and fetches its location:
+\begin{lstlisting}
+    [boxC (e)
+          (type-case Result (eval-env env sto e)
+            [res (v sto1)
+                 (let ([l (new-loc)])
+                   (res (boxV l) (override-store (cell l v) sto1)))])]
+    [unboxC (e)
+            (type-case Result (eval-env env sto e)
+              [res (v1 sto1)
+                   (let ([v2 (fetch (boxV-l v1) sto1)])
+                     (res v2 sto1))])]
+\end{lstlisting}
+Note that \code{unboxC} fetches from \code{sto1}, the store \emph{after} evaluating \code{e}, in case evaluating the box expression itself wrote to it. \code{setboxC} evaluates the box and then the new contents, threading the store as \code{plusC} does, and adds a cell for the box's location on top of \code{sto2}:
+\begin{lstlisting}
+    [setboxC (e1 e2)
+             (type-case Result (eval-env env sto e1)
+               [res (v1 sto1)
+                    (type-case Result (eval-env env sto1 e2)
+                      [res (v2 sto2)
+                           (res v1 (override-store (cell (boxV-l v1) v2) sto2))])])]
+    [seqC (e1 e2)
+          (type-case Result (eval-env env sto e1)
+            [res (v1 sto1)
+                 (eval-env env sto1 e2)])]
+\end{lstlisting}
+Two details:
+\begin{itemize}
+  \item \code{setboxC} returns \code{v1}, the box itself, not the new contents and not a void value (the language has none). This is a design choice; Racket's \code{set-box!} returns \code{(void)}.
+  \item \code{seqC} discards \code{v1} but \emph{not} \code{sto1}: \code{e2} runs in the store that \code{e1} left behind. In Attempt~1 the \code{seqC} clause looked the same, but there was no store to pass on, so \code{e1} could only be evaluated and forgotten. Here sequencing finally has a purpose: \code{e1} is run for its effect on the store.
+\end{itemize}
+
+\subsection{Running the Examples}
+
+Each in a fresh session, so that \code{new-loc} starts at 0:
+\begin{lstlisting}[style=repl]
+> (eval ex1)
+- Result
+(res (numV 4) '())
+> (eval ex2)
+- Result
+(res (boxV 0) (list (cell 0 (numV 1)) (cell 0 (numV 0))))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+> (eval ex3)
+- Result
+(res (numV 0) (list (cell 0 (numV 0))))
+> (eval ex4)
+- Result
+(res (numV 2) (list (cell 0 (numV 2)) (cell 0 (numV 1)) (cell 0 (numV 0))))
+> (eval ex5)
+- Result
+(res (numV 12) (list (cell 0 (numV 2)) (cell 0 (numV 1))))
+\end{lstlisting}
+All five are now right. \code{ex1} allocates nothing, so its final store is empty. \code{ex2} is the result shown in lecture: the value is the box, location 0, and the store holds two cells for location 0, the write of 1 in front of the initial 0.
+
+\subsection{Tracing \texttt{ex4}}
+
+Write the store newest first, with \code{l:v} for \code{(cell l v)}. The outer \code{let} becomes an application of \code{(lambda b ...)} to \code{(box 0)}:
+\begin{lstlisting}[style=repl]
+(let b (box 0) (begin (begin (set-box! b 1)
+                             (set-box! b (+ 1 (unbox b))))
+                      (unbox b)))
+  (lambda b ...)                          ---> closure, sto = []
+  (box 0)       new location 0            sto = [0:0]
+  body in env [b=(boxV 0)]
+    (set-box! b 1)                        sto = [0:1, 0:0]
+    (set-box! b (+ 1 (unbox b)))
+      (unbox b): fetch 0 ---> 1
+      (+ 1 1) ---> 2                      sto = [0:2, 0:1, 0:0]
+    (unbox b): fetch 0 ---> 2
+---> (numV 2) with sto = [0:2, 0:1, 0:0]
+\end{lstlisting}
+The environment never changes after the \code{let}: \code{b} is bound to \code{(boxV 0)} throughout. Every change happens in the store, and each \code{begin} hands the store from its first part to its second.
+
+\subsection{Tracing \texttt{ex5}: Two Tables, Two Paths}
+
+\begin{lstlisting}[style=repl]
+(let a (box 1)
+  (let f (lambda x (+ x (unbox a)))
+    (begin (set-box! a 2) (f 10))))
+  (box 1)       new location 0            sto = [0:1]
+  env [a=(boxV 0)]
+  (lambda x ...) ---> f = (closV [a=(boxV 0)] x (+ x (unbox a)))
+  env [f=closure, a=(boxV 0)]
+  (set-box! a 2)                          sto = [0:2, 0:1]
+  (f 10)
+    body env:   the closure's [a=(boxV 0)] + x=10
+    body store: the current one,          sto = [0:2, 0:1]
+    (unbox a): fetch 0 ---> 2
+    (+ 10 2) ---> 12
+---> (numV 12) with sto = [0:2, 0:1]
+\end{lstlisting}
+The closure saved the binding \code{a=(boxV 0)}: a location, not a number. The location has not changed since the closure was created, but the store has, and the call reads the current store (\Cref{fig:envstore}). This is how lexical scope and mutation coexist: the closure fixes \emph{which} box \code{a} is, and the store says what is in it \emph{now}.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm]
+  \node[cell, fill=tsk, minimum width=10mm] (cenv) at (0,0) {};
+  \node[cell, fill=tsk, minimum width=7mm, right=0pt of cenv] (cx) {x};
+  \node[cell, fill=tsk, minimum width=30mm, right=0pt of cx] (ce) {(+ x (unbox a))};
+  \node[lbl, above=1mm of cx] {\code{f} = \code{closV}};
+  \node[cell, fill=uspace, minimum width=22mm] (a) at (0,-1.6) {a=(boxV 0)};
+  \fill (cenv.center) circle (0.6mm);
+  \draw[ptr] (cenv.center) -- (a.north);
+  \node[lbl, left=2mm of a, align=right, text=accent] {saved when the\\ \code{lambda} was evaluated};
+  \node[cell, fill=kspace, minimum width=14mm] (x) at (0,-3.2) {x=10};
+  \draw[ptr] (x) -- (a);
+  \node[lbl, below=1mm of x, align=center] {environment of the body:\\ the closure's env + the parameter};
+  \node[cell, fill=greybg, minimum width=12mm] (s2) at (5.6,-1.6) {0:2};
+  \node[cell, fill=greybg, minimum width=12mm, right=5mm of s2] (s1) {0:1};
+  \node[right=2mm of s1, lbl] (nil) {\code{[]}};
+  \draw[ptr] (s2) -- (s1); \draw[ptr] (s1) -- (nil);
+  \node[lbl, above=1mm of s2, xshift=8mm] {store \code{sto2}, passed in at the call};
+  \draw[ptr, accent] (a.east) -- node[above, lbl, text=accent] {\code{fetch 0} stops here} (s2.west);
+  \draw[decorate, decoration={brace, mirror, amplitude=4pt}] ($(s1.south west)+(0,-1mm)$) -- ($(nil.south east)+(0,-1mm)$) node[midway, below=2mm, lbl, align=center] {the store when\\ \code{f} was created};
+\end{tikzpicture}
+\caption{\code{ex5} while evaluating \code{(unbox a)} in \code{f}'s body. The environment (left) comes from the closure; the store (right) is the current one. The store at closure-creation time is still there as a suffix, but nothing reads it, since \code{fetch} stops at the newer cell.}
+\label{fig:envstore}
+\end{figure}
+
+\begin{keypoint}[Where the environment and the store come from]
+\begin{center}
+\begin{tabular}{@{}p{0.3\linewidth}p{0.3\linewidth}p{0.3\linewidth}@{}}
+\toprule
+& environment & store \\
+\midrule
+to subexpressions & the same \code{env} to each & chained: \code{sto}, then \code{sto1}, \ldots \\
+returned by \code{eval-env} & never & always, in the \code{res} \\
+saved in a closure & yes & no \\
+used for a function body & the closure's, extended & the current one, \code{sto2} \\
+follows & the program text & the order of evaluation \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{keypoint}
+
+\subsection{The Store Only Grows}
+
+Nothing ever removes a cell. \code{set-box!} conses a new cell for an existing location, and the old one stays behind it, unreachable by \code{fetch}: after \code{ex4} the store holds three cells for location 0, of which only the first matters. Boxes that no part of the program can reach any more also keep their cells. A real implementation would overwrite a location in place and reclaim the memory of unreachable boxes with a garbage collector~\cite[Chapter~11]{PLAI}. For explaining what mutation \emph{means}, a store that only grows is simpler: every past state is still visible in the trace, and the store after any step is the store before it with some cells added on the front.

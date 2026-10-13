@@ -1,0 +1,24 @@
+\chapter{Week 6: Mutable State}
+\label{ch:week6}
+
+Lecture 6: October 13, 2026. Recitation~6 will be added after it meets.
+
+Supplementary reading:
+\begin{itemize}
+  \item \cite{PLAI} Chapter 8 (Mutation: Structures and Variables), Section 8.1 in particular, which adds boxes to the closure interpreter with a store as this lecture does.
+  \item \cite{SICP} Section 3.1 (Assignment and Local State), for what assignment costs: an expression can no longer be replaced by its value.
+  \item \cite{Reynolds}, optional: the paper that names the problem of \Cref{sec:metacirc}, an interpreter that silently inherits features of the language it is written in.
+\end{itemize}
+
+Every interpreter so far has been \emph{pure}: evaluating an expression produced a value and nothing else, so the same expression in the same environment always gave the same answer. Lecture~6 adds the smallest piece of mutable state, the box of \Cref{sec:scopestate}, to last week's closure interpreter (\code{lecture5e.rkt}, \Cref{sec:closures}). The first attempt stores a box's contents directly in the value and cannot express \code{set-box!}. The fix is a second table next to the environment, the \emph{store}, which maps locations to values and is passed into and out of every evaluation step. The lecture then writes the same interpreter a second time using Racket's own boxes, and compares the two. This chapter covers:
+\begin{itemize}
+  \item \Cref{sec:stateboxes}: the four new constructs, the examples, and a first attempt that cannot mutate;
+  \item \Cref{sec:storepass}: store-passing style, with locations, \code{fetch}, the \tyname{Result} type, and threading the store through arithmetic, \code{let}, and application;
+  \item \Cref{sec:storeboxes}: the box clauses of the store-passing interpreter, with traces showing where the environment and where the store come from;
+  \item \Cref{sec:metacirc}: the meta-circular interpreter, which implements boxes with Racket boxes, and what each version explains.
+\end{itemize}
+
+\input{chapters/week6/01-state-boxes}
+\input{chapters/week6/02-store-passing}
+\input{chapters/week6/03-store-boxes}
+\input{chapters/week6/04-meta-circular}

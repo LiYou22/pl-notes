@@ -100,7 +100,64 @@ A program can now produce a function, for example \code{(lambda x (+ x 1))} or \
 \end{lstlisting}
 This is the first \emph{dynamic} type error in our language: whether \code{(+ e1 e2)} is meaningful depends on what \code{e1} and \code{e2} evaluate to, which the interpreter only learns at run time.
 
-\subsection{\texttt{eval-lazy-v2}}
+\subsection{Eager Application}
+\label{sec:eagerapp}
+
+The lecture first adds functions to the \emph{eager} interpreter (\code{lec4b.rkt}, \code{lec4c.rkt}). Application is \emph{call-by-value}: evaluate the function, evaluate the argument, then substitute the argument's \emph{value} into the body. \code{let} works the same way.
+
+\code{subst-eager} substitutes only numbers, but a value may now be a function. So the value is turned back into an expression, and substituted with the expression-substituting \code{subst-lazy} or \code{subst-lazy-v2}. The expression they receive is already evaluated, so nothing is lazy about it:
+\begin{lstlisting}
+(define (value->expr (v : Value)) : ArithE
+  (type-case Value v
+    [numV (n) (numC n)]
+    [funV (x e) (lambdaC x e)]))
+
+(define (eval-eager-v2 (e : ArithE)) : Value
+  (type-case ArithE e
+    [numC (n) (numV n)]
+    [idC (x) (error 'eval "unbound variable")]
+    [plusC (e1 e2) (num+ (eval-eager-v2 e1) (eval-eager-v2 e2))]
+    [timesC (e1 e2) (num* (eval-eager-v2 e1) (eval-eager-v2 e2))]
+    [letC (y e1 e2)
+          (eval-eager-v2 (subst-lazy (value->expr (eval-eager-v2 e1)) y e2))]
+    [lambdaC (x e) (funV x e)]
+    [appC (e1 e2)
+          (type-case Value (eval-eager-v2 e1)
+            [funV (x e)
+                  (eval-eager-v2 (subst-lazy (value->expr (eval-eager-v2 e2)) x e))]
+            [numV (n) (error 'eval "not a function")])]))
+\end{lstlisting}
+The lecture's \code{lec4b.rkt} writes this with \code{Expr} for \tyname{ArithE} and \code{lambdaV} for \code{funV}, and gives \code{subst} a \tyname{Value} that it converts at the \code{idC} case; the effect is the same. Functions can now be passed around:
+\begin{lstlisting}[style=repl]
+(let do-twice (lambda f (f (f 1)))
+  (let double (lambda x (* 2 x))
+    (do-twice double)))
+---> (do-twice double)  with both substituted
+---> (double (double 1))
+---> 4
+\end{lstlisting}
+
+\subsubsection{Eager capture} \Cref{sec:lazy} said that eager substitution cannot capture because a number has no names in it. A function value does have names, and its body may contain free variables:
+\begin{lstlisting}[style=repl]
+(let f (lambda x (+ x y))         y is free in f's body
+  (let y 6
+    (f 1)))
+---> (let y 6 ((lambda x (+ x y)) 1))   substitute f's value: y is captured
+---> ((lambda x (+ x 6)) 1)
+---> 7
+\end{lstlisting}
+The right answer is an error: the \code{y} in \code{f} refers to no binding, and Racket rejects the same program with \code{y: unbound identifier}. \code{eval-eager-v2} returns 7 because \code{subst-lazy} carried the free \code{y} under \code{(let y 6 ...)}. Eager evaluation is not a defense against capture once values can contain code.
+
+The fix (\code{lec4c.rkt}) is the one from \Cref{sec:capavoid}: \code{eval-eager-v3} is \code{eval-eager-v2} with both calls to \code{subst-lazy} replaced by \code{subst-lazy-v2}. Now the program above raises \code{unbound variable}, and returning \code{f} instead of calling it shows the renaming:
+\begin{lstlisting}[style=repl]
+> (eval-eager-v3 (parse '(let f (lambda x (+ x y)) (let y 6 f))))
+(funV 'g3507 (plusC (idC 'g3507) (idC 'y)))
+\end{lstlisting}
+Substituting \code{f} into the body of \code{(let y 6 ...)} renamed \code{f}'s parameter to a fresh name, as the \code{lambdaC} case of \code{subst-lazy-v2} always does; the free \code{y} stays free.
+
+\subsection{Lazy Application: \texttt{eval-lazy-v2}}
+
+The last version (\code{lec4d.rkt}) makes application lazy, like \code{let} in \Cref{sec:lazy}: the argument is substituted unevaluated.
 
 \begin{lstlisting}
 (define (eval-lazy-v2 (e : ArithE)) : Value
@@ -139,6 +196,7 @@ program & result \\
 \code{((lambda f (f 3)) (lambda x (+ x 1)))} & \code{(numV 4)}: a function as argument \\
 \code{(((lambda x (lambda y (+ x y))) 1) 2)} & \code{(numV 3)}: a function as result \\
 \code{((lambda x 5) y)} & \code{(numV 5)}: the unused argument is never evaluated \\
+the \code{do-twice} example of \Cref{sec:eagerapp} & \code{(numV 4)} \\
 \code{(5 3)} & \code{not a function} \\
 \code{(+ (lambda x x) 1)} & \code{not a number} \\
 \bottomrule
@@ -153,7 +211,20 @@ With functions, capture-avoiding substitution matters even more. A function can 
 subst-lazy:     (lambda y (+ y y)),  then 2 ---> 4          captured!
 subst-lazy-v2:  (lambda g (+ y g)),  then 2 ---> (+ y 2) ---> unbound variable
 \end{lstlisting}
-\code{eval-eager} and \code{eval-lazy} still return a \code{number}, and \code{subst-eager} can substitute only numbers, so their \code{lambdaC} and \code{appC} cases remain errors (\code{"TODO: lambda"}) for now.
+\code{eval-eager} and \code{eval-lazy} still return a \code{number}, and \code{subst-eager} can substitute only numbers, so their \code{lambdaC} and \code{appC} cases remain errors (\code{"TODO: lambda"}); \code{eval-eager-v2}/\code{v3} and \code{eval-lazy-v2} are the versions with functions.
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+program & \code{eval-eager-v3} (call-by-value) & \code{eval-lazy-v2} (call-by-name) \\
+\midrule
+\code{((lambda x 5) y)} & \code{unbound variable} & \code{(numV 5)} \\
+\code{(let x (+ y y) 10)} & \code{unbound variable} & \code{(numV 10)} \\
+the \code{f}/\code{y} example of \Cref{sec:eagerapp} & \code{unbound variable} & \code{unbound variable} \\
+\bottomrule
+\end{tabular}
+\end{center}
+With capture-avoiding substitution, the two strategies differ only where an argument is never used, as for \code{let} in \Cref{sec:lazy}. Racket, like most languages, is call-by-value.
 
 \subsection{(SUPPLEMENT) Further Topics}
 
@@ -161,6 +232,4 @@ subst-lazy-v2:  (lambda g (+ y g)),  then 2 ---> (+ y 2) ---> unbound variable
 
 \subsubsection{Why \code{funV} stores no environment} In \code{eval-lazy-v2}, a function value is just its parameter and body. That is enough only because substitution has already replaced every free variable of the body by the time the \code{lambda} is evaluated, as in \rkt|(((lambda x (lambda y (+ x y))) 1) 2)|, where \code{x} is replaced by \code{1} before the inner \code{lambda} becomes a value. An environment-based interpreter cannot do this: it must store the environment with the function, as a \emph{closure} (\Cref{sec:hof}). Forgetting to do so gives dynamic scope~\cite[Chapter~6]{PLAI}.
 
-\subsubsection{When can capture actually happen?} Both evaluators substitute from the outside in: an outer \code{let} or call is processed before anything inside it. So if the whole program is closed, every expression that gets substituted is closed as well, and there is nothing to capture. Capture therefore shows up only in programs with free variables, exactly the lecture's examples, where the right answer is ``unbound variable'' but a capturing substitution produces a number. It becomes unavoidable in settings that substitute \emph{open} terms: reducing inside function bodies (normal-order reduction in the lambda calculus, or a compiler inlining and simplifying a function body), and macro expansion. That is why every serious implementation of substitution is capture-avoiding.
-
-\subsubsection{Call-by-value application} An eager \code{appC} evaluates the argument first and substitutes the resulting value into the body. Under call-by-value, \code{((lambda x 5) y)} is an unbound-variable error instead of 5, the same eager/lazy difference as for \code{let} in \Cref{sec:lazy}. Racket, like most languages, applies functions this way.
+\subsubsection{When can capture actually happen?} All of our evaluators substitute from the outside in: an outer \code{let} or call is processed before anything inside it. So if the whole program is closed, every expression that gets substituted is closed as well, and there is nothing to capture. Capture therefore shows up only in programs with free variables, exactly the lecture's examples, where the right answer is ``unbound variable'' but a capturing substitution produces a number. It becomes unavoidable in settings that substitute \emph{open} terms: reducing inside function bodies (normal-order reduction in the lambda calculus, or a compiler inlining and simplifying a function body), and macro expansion. That is why every serious implementation of substitution is capture-avoiding. The lecture code (\code{lec4a.rkt}) mentions the cheap alternative for our setting: check before running that the program has no unbound variables, after which substitution only ever substitutes closed expressions.

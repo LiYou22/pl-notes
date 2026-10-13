@@ -71,6 +71,8 @@ Only the binding case changes. If the inner \code{let} binds the same name as th
 \end{lstlisting}
 The inner \code{y} became \code{g3445}, and the \code{y} that came from outside is still free, so evaluation reports it as unbound. Now the \code{y} and \code{z} versions of the program agree.
 
+The lecture's version (\code{lec4a.rkt}) splits the \code{letC} case three ways: \code{x} equals \code{y}; \code{y} is \code{possibly-free?} in \code{v}, so rename; otherwise substitute without renaming. Its \code{possibly-free?} is a stub that always returns \code{\#t}, so it behaves exactly like the two-way code above. Implementing \code{possibly-free?} properly, so that renaming happens only when needed, is left as an exercise (see the free-variable definition in \Cref{sec:letsubst}).
+
 \begin{remark}
 Step~2 uses the old \code{subst-lazy}, which may capture in general. It is safe here because the expression being substituted, \rkt|(idC z)|, contains only the fresh name \code{z}, which nothing in \code{e2} can bind.
 \end{remark}

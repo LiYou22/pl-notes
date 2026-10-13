@@ -1,0 +1,538 @@
+\section{Recitation 5: Environments as Functions, Scope, and Macros}
+\label{sec:rec5}
+
+Lecture~5 built environment interpreters twice, and twice the first attempt had dynamic scope (\Cref{sec:dynscope,sec:closures}). This recitation comes back to the same material from four sides:
+\begin{enumerate}
+  \item a second representation of environments, as \emph{functions} instead of lists;
+  \item one interpreter with a flag \code{dynamic?} that runs any program under either scope;
+  \item small programs whose result depends on the scope, to predict and then check;
+  \item scope in languages with assignment, and scope in \emph{macros}, where the static/dynamic question comes back as \emph{hygiene}.
+\end{enumerate}
+The handout files are \code{recitation5.rkt} (parts 1--4), \code{macro.rkt} with \code{unhygenic.c} (macros), and \code{bexp.lean} (a short look at Lean). No TA solutions have been posted yet. The code below is my completed handout, and every result in this section comes from running it.
+
+\subsection{The Language}
+
+The language is that of \code{lecture5e.rkt}: numbers, \code{+}, \code{*}, \code{let}, one-argument \code{lambda}, and application.
+\begin{lstlisting}
+(define-type Expr
+  [numC (n : number)]
+  [plusC (e1 : Expr) (e2 : Expr)]
+  [timesC (e1 : Expr) (e2 : Expr)]
+  [letC (x : symbol) (e1 : Expr) (e2 : Expr)]
+  [lambdaC (x : symbol) (e : Expr)]
+  [appC (e1 : Expr) (e2 : Expr)]
+  [idC (x : symbol)])
+
+(define-type Value
+  [numV (n : number)]
+  [closV (env : Env) (x : symbol) (e : Expr)])
+\end{lstlisting}
+\code{parse} is the lecture's. A list whose head is not \code{+}, \code{*}, \code{lambda}, or \code{let} is an application, whether the head is some other symbol, as in \code{(f 0)}, or another list, as in \code{((lambda x x) 3)}. Since every function takes exactly one argument, a function that needs none takes a dummy argument \code{\_} and is called with \code{0}.
+
+\subsection{Environments as Functions}
+
+In \Cref{sec:env} an environment was a list of bindings, and \code{lookup} walked the list. But the only thing the interpreter ever does with an environment is ask ``what is \code{x} bound to?'' So an environment can simply \emph{be} the function that answers that question:
+\begin{lstlisting}
+(define-type-alias Env (symbol -> (optionof Value)))
+\end{lstlisting}
+Given a name, the environment returns \rkt|(some v)| if the name is bound to \code{v} and \rkt|(none)| if it is unbound. \code{optionof} is plai-typed's built-in ``maybe'' type, with the two variants \code{some} and \code{none}. \tyname{Env} and \tyname{Value} refer to each other (a closure holds an environment, an environment returns values), which \code{define-type} allows across definitions.
+
+\subsubsection{The three operations} The handout leaves three definitions to fill in.
+
+\begin{exercise}[The empty environment]
+Define \code{empty-env : Env}, the environment in which nothing is bound.
+\end{exercise}
+\begin{solution}
+\begin{lstlisting}
+(define empty-env : Env
+  (lambda (x) (none)))
+\end{lstlisting}
+It answers \code{none} for every name. It does not raise an error itself; it only says ``not here'', and \code{lookup} decides that this is an error.
+\end{solution}
+
+\begin{exercise}[\code{extend-env}]
+Define \code{(extend-env x v env)}, which binds \code{x} to \code{v} on top of \code{env}. Hint: return a new function. When is it asked about \code{x}? What should it do otherwise?
+\end{exercise}
+\begin{solution}
+\begin{lstlisting}
+(define (extend-env (x : symbol) (v : Value) (env : Env)) : Env
+  (lambda (y)
+    (if (equal? x y)
+        (some v)
+        (env y))))
+\end{lstlisting}
+Asked about \code{x}, the name it binds, the new function answers \code{v}. Asked about any other name, it passes the question on to the environment it extends. The old \code{env} is captured in the closure that \code{lambda} builds, so this is a closure in Racket, the very thing \code{closV} implements in our language. Unlike the lecture's \code{extend-env}, which took a \tyname{Binding}, this one takes the name and value directly; there is no \tyname{Binding} type at all.
+\end{solution}
+
+\begin{exercise}[\code{lookup}]
+Define \code{(lookup x env)}, which returns the value bound to \code{x} in \code{env} and signals an error if \code{x} is unbound, with the message \rkt|(string-append "unbound variable: " (symbol->string x))|. Hint: you can \code{type-case} on an \code{optionof}, just as on a type you defined.
+\end{exercise}
+\begin{solution}
+\begin{lstlisting}
+(define (lookup (x : symbol) (env : Env)) : Value
+  (type-case (optionof Value) (env x)
+    [some (v) v]
+    [none () (error 'lookup (string-append "unbound variable: " (symbol->string x)))]))
+\end{lstlisting}
+\code{lookup} calls the environment on \code{x} and takes the answer apart: \code{some} carries the value, \code{none} means no layer recognized the name.
+\end{solution}
+
+\begin{pitfall}[\code{type-case} syntax: plai-typed is not plait]
+My first version of \code{lookup} wrote the clauses as \rkt|[(some v) v]| and \rkt|[(none) ...]|, and the type as \code{(Optionof Value)}. The file then does not even compile:
+\begin{lstlisting}[style=repl]
+type-case: expected an identifier from a define-type
+  at: (some v)
+\end{lstlisting}
+That is the syntax of \code{\#lang plait}, the successor of plai-typed used in newer PLAI courses. In \code{\#lang plai-typed} a clause is the variant name followed by a parenthesized list of field names, \rkt|[some (v) ...]| and \rkt|[none () ...]|, exactly as in every \code{type-case} on \tyname{Expr} so far; the type is written in lower case, \code{optionof}.
+\end{pitfall}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[fn/.style={draw, rounded corners=2pt, fill=kspace, align=left, inner sep=4pt, font=\ttfamily\footnotesize}]
+  \node[fn] (e2) at (0,0) {env-2:\\(lambda (y)\\\ \ (if (equal? 'x y)\\\ \ \ \ \ \ (some (numV 3))\\\ \ \ \ \ \ (env-1 y)))};
+  \node[fn, right=8mm of e2] (e1) {env-1:\\(lambda (y)\\\ \ (if (equal? 'x y)\\\ \ \ \ \ \ (some (numV 1))\\\ \ \ \ \ \ (\textrm{\textit{next}} y)))};
+  \node[fn, right=8mm of e1] (e0) {(lambda (y)\\\ \ (if (equal? 'y y)\\\ \ \ \ \ \ (some (numV 2))\\\ \ \ \ \ \ (empty-env y)))};
+  \node[fn, fill=greybg, below=8mm of e0] (em) {empty-env:\\(lambda (x) (none))};
+  \draw[ptr] (e2) -- node[above, lbl] {else} (e1);
+  \draw[ptr] (e1) -- node[above, lbl] {else} (e0);
+  \draw[ptr] (e0) -- node[right, lbl] {else} (em);
+\end{tikzpicture}
+\caption{\code{env-1} and \code{env-2} from the handout, as chains of closures. Each \code{extend-env} wraps the previous environment; a lookup enters at the left and moves right until some layer recognizes the name. \code{(lookup 'x env-2)} stops at the first box (3), and \code{env-1}, still reachable on its own, answers 1.}
+\label{fig:fnenv}
+\end{figure}
+
+\subsubsection{Tests} The handout builds two environments (\Cref{fig:fnenv}):
+\begin{lstlisting}
+(define env-1 (extend-env 'x (numV 1) (extend-env 'y (numV 2) empty-env)))
+(define env-2 (extend-env 'x (numV 3) env-1))
+
+(test (lookup 'x env-1) (numV 1))
+(test (lookup 'y env-1) (numV 2))
+(test/exn (lookup 'z env-1) "unbound")
+(test (lookup 'x env-2) (numV 3))   ; the newer binding shadows the older one
+(test (lookup 'x env-1) (numV 1))   ; env-1 is unchanged
+\end{lstlisting}
+Shadowing works for the same reason as with lists: the newest binding is asked first. The last test is \emph{persistence}: extending \code{env-1} built a new function around it and changed nothing, which is what lets a closure keep the environment of its \code{lambda} while the rest of the program goes on extending.
+
+\begin{exercise}[Lookup time]
+How long does \code{lookup} take, compared to the list version?
+\end{exercise}
+\begin{solution}
+The same: linear in the number of bindings. A lookup calls one closure per enclosing \code{extend-env} until one matches, just as the list version visits one \code{cons} cell per binding. The function representation hides the chain inside closures, but the chain is still there (\Cref{fig:fnenv}). Neither version does better than linear; a faster lookup needs another data structure (a hash table, or, in a compiler, a known position for each variable).
+\end{solution}
+
+\begin{exercise}[What lists can do]
+What can you do with a list environment that you can't do with a function environment?
+\end{exercise}
+\begin{solution}
+Anything other than asking about one name. A function is opaque: the only operation on it is calling it. With a list you can
+\begin{itemize}
+  \item print it, which matters for debugging: a \code{closV} shows its environment as \code{\#<procedure>};
+  \item enumerate it: list all bound names, count them, or find the free variables a closure actually uses;
+  \item compare two environments for equality. Two \code{closV}s with function environments can never be compared structurally, so a \code{test} whose expected value is a closure cannot be written;
+  \item remove a binding, or save it to a file.
+\end{itemize}
+In exchange, the function representation commits to nothing: any function of type \code{(symbol -> (optionof Value))} is an environment, for example one that computes bindings on demand.
+\end{solution}
+
+\subsection{One Interpreter, Two Scopes}
+
+The handout gives \code{lecture5e.rkt}'s interpreter on the new environments, with one extra argument \code{dynamic?}: \code{\#f} for static scope (as in \code{lecture5e.rkt}), \code{\#t} for dynamic scope (as in \code{lecture5d.rkt}). Every case except \code{appC} is written, and is the same for both scopes:
+\begin{lstlisting}
+(define (eval-env (dynamic? : boolean) (env : Env) (e : Expr)) : Value
+  (type-case Expr e
+    [numC (n) (numV n)]
+    [plusC (e1 e2) (numV (+ (numV-n (eval-env dynamic? env e1))
+                            (numV-n (eval-env dynamic? env e2))))]
+    [timesC (e1 e2) (numV (* (numV-n (eval-env dynamic? env e1))
+                             (numV-n (eval-env dynamic? env e2))))]
+    [letC (x e1 e2)
+          (let ([v1 (eval-env dynamic? env e1)])
+            (eval-env dynamic? (extend-env x v1 env) e2))]
+    [idC (x) (lookup x env)]
+    [lambdaC (x body) (closV env x body)]
+    [appC (e1 e2) ...]))                    ; the exercise below
+
+(define (eval-static (s : s-expression)) : Value
+  (eval-env #f empty-env (parse s)))
+(define (eval-dynamic (s : s-expression)) : Value
+  (eval-env #t empty-env (parse s)))
+\end{lstlisting}
+
+\begin{exercise}[The \code{appC} case]
+Fill in \code{appC}. Which environment should the function body run in? Under static scope, the environment saved in the closure (where the \code{lambda} was written); under dynamic scope, the current environment (where the function is called).
+\end{exercise}
+\begin{solution}
+\begin{lstlisting}
+    [appC (e1 e2)
+          (let ([f (eval-env dynamic? env e1)]
+                [arg (eval-env dynamic? env e2)])
+            (type-case Value f
+              [closV (cenv x body)
+                     (eval-env dynamic?
+                               (extend-env x arg (if dynamic? env cenv))
+                               body)]
+              [else (error 'eval-env "not a function")]))]
+\end{lstlisting}
+A call evaluates the function and the argument (eager), and then has to choose \emph{which environment to extend} with the parameter:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+scope & body runs in & which is \\
+\midrule
+static (\code{dynamic?} = \code{\#f}) & \code{cenv}, saved in the closure & where the \code{lambda} was written \\
+dynamic (\code{dynamic?} = \code{\#t}) & \code{env}, the current environment & where the function is called \\
+\bottomrule
+\end{tabular}
+\end{center}
+That one \code{if} is the whole difference between \code{lecture5d.rkt} and \code{lecture5e.rkt}. In dynamic mode the closure still saves \code{cenv}, but nothing ever reads it, so a \code{closV} there is just the \code{lambdaV} of \Cref{sec:closures}. The \code{else} clause catches a call of a number, such as \code{(1 2)}, which raises \code{eval-env: not a function} in both modes.
+\end{solution}
+
+The example from the end of lecture (\Cref{fig:addx}) gives one answer per scope:
+\begin{lstlisting}
+(define lecture-example
+  '(let x 2
+     (let addx (lambda y (+ y x))
+       (let x 6
+         (addx 3)))))
+
+(test (eval-static lecture-example) (numV 5))   ; x from where addx was written
+(test (eval-dynamic lecture-example) (numV 9))  ; x from where addx was called
+\end{lstlisting}
+All seven tests in the file pass.
+
+\subsection{Predict, Then Check}
+
+For each program, predict the result under static scope and under dynamic scope \emph{before} running it; then check with \code{(eval-static ...)} and \code{(eval-dynamic ...)}. The result may be an error rather than a value, and then the question is which error and why. In our language every local variable becomes a \code{let}, and a function that needs no argument takes a dummy \code{\_} and is called with \code{0}.
+
+\begin{exercise}[Predict, part a]
+In C-like syntax:
+\begin{lstlisting}[language=C]
+int x = 14;
+int h()  { return x; }
+int f()  { int x = 13; return h(); }
+int g()  { int x = 12; return h(); }
+\end{lstlisting}
+What do \code{f()} and \code{g()} return? In our language:
+\begin{lstlisting}
+(define ex-a-f
+  '(let x 14
+     (let h (lambda _ x)
+       (let f (lambda _ (let x 13 (h 0)))
+         (let g (lambda _ (let x 12 (h 0)))
+           (f 0))))))
+;; ex-a-g: the same, ending in (g 0)
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+Static: both return \code{(numV 14)}. Dynamic: \code{f()} returns \code{(numV 13)} and \code{g()} returns \code{(numV 12)}. The body \code{x} is free in \code{h}. Statically it means the \code{x} visible where \code{h} is written, the global 14, whoever calls \code{h}. Dynamically it means the most recent \code{x} on the way to the call: \code{f}'s 13, or \code{g}'s 12. So under dynamic scope the same function returns different values depending on its caller, and renaming \code{f}'s local \code{x} to \code{z}, which should not matter, changes the result back to 14.
+\end{solution}
+
+\begin{exercise}[Predict, part b]
+In C-like syntax:
+\begin{lstlisting}[language=C]
+const int b = 5;
+int foo() { int a = b + 5; return a; }
+int bar() { int b = 2; return foo(); }
+\end{lstlisting}
+What does \code{bar()} return? In our language:
+\begin{lstlisting}
+(define ex-b
+  '(let b 5
+     (let foo (lambda _ (let a (+ b 5) a))
+       (let bar (lambda _ (let b 2 (foo 0)))
+         (bar 0)))))
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+Static: \code{(numV 10)}. Dynamic: \code{(numV 7)}. This is part a again with a twist: \code{b} is meant to be a constant, yet under dynamic scope \code{bar}'s local \code{b} replaces it inside \code{foo}, giving $2+5=7$ instead of $5+5=10$. A \code{const} declaration does not protect a name from being shadowed.
+\end{solution}
+
+\begin{exercise}[Predict, part c]
+\code{f} uses a variable \code{y} that is not bound where \code{f} is written:
+\begin{lstlisting}
+(define ex-c
+  '(let f (lambda _ y)
+     (let y 3
+       (f 0))))
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+Static: \code{lookup: unbound variable: y}. Dynamic: \code{(numV 3)}. \code{f} is written where no \code{y} exists, so statically its body can never find one, and the call fails. Dynamically the call happens inside \code{(let y 3 ...)}, and the lookup finds that \code{y}. Dynamic scope ``fixes'' this program, but it is the kind of program a static checker would rightly reject, since whether \code{f} works depends on every caller.
+\end{solution}
+
+\begin{exercise}[Predict, part d]
+A function that returns a function:
+\begin{lstlisting}
+(define ex-d
+  '(let make-adder (lambda n (lambda m (+ n m)))
+     (let add5 (make-adder 5)
+       (add5 1))))
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+Static: \code{(numV 6)}. Dynamic: \code{lookup: unbound variable: n}. This is the program that sinks dynamic scope. Under static scope, \code{(make-adder 5)} evaluates \code{(lambda m (+ n m))} in \code{make-adder}'s body, where \code{n} is 5, and the closure saves that environment. Under dynamic scope the saved environment is ignored, and \code{n} exists only while \code{make-adder} is running:
+\begin{lstlisting}[style=repl]
+(add5 1), dynamic:
+  env at the call = {add5 = <m-closure>, make-adder = <n-closure>}
+  body (+ n m) runs in that env extended with m = 1
+  lookup n  --->  unbound variable: n
+\end{lstlisting}
+The binding of \code{n} disappeared when \code{make-adder} returned, but the function that uses it did not. This is the upward funarg problem of \Cref{sec:dynscope}: returning a function needs the environment of its definition.
+\end{solution}
+
+\begin{exercise}[Predict, part e]
+Same as part d, but now some other \code{n} is around when \code{add5} is called:
+\begin{lstlisting}
+(define ex-e
+  '(let make-adder (lambda n (lambda m (+ n m)))
+     (let add5 (make-adder 5)
+       (let n 100
+         (add5 1)))))
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+Static: \code{(numV 6)}. Dynamic: \code{(numV 101)}. With an unrelated \code{n} at the call site, dynamic scope no longer fails; it silently uses that \code{n}, so \code{add5} adds 100. That is worse than part d: a crash points at the bug, a wrong number does not. \Cref{fig:rec5e} shows the two environments the body of \code{add5} runs in.
+\end{solution}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm, b/.style={cell, minimum width=36mm}]
+  \node[font=\bfseries] at (1.2,0.8) {static: \code{cenv} of \code{add5}};
+  \node[b, fill=tsk] (s1) at (1.2,0) {m = 1};
+  \node[b, fill=uspace] (s2) at (1.2,-0.9) {n = 5};
+  \node[b, fill=greybg] (s3) at (1.2,-1.8) {empty};
+  \draw[ptr] (s1) -- (s2); \draw[ptr] (s2) -- (s3);
+  \node[lbl, right=2mm of s2, text=accent] {\code{lookup n} stops here};
+
+  \node[font=\bfseries] at (8.2,0.8) {dynamic: \code{env} at the call};
+  \node[b, fill=tsk] (d1) at (8.2,0) {m = 1};
+  \node[b, fill=sigc!20] (d2) at (8.2,-0.9) {n = 100};
+  \node[b] (d3) at (8.2,-1.8) {add5 = closure};
+  \node[b] (d4) at (8.2,-2.7) {make-adder = closure};
+  \node[b, fill=greybg] (d5) at (8.2,-3.6) {empty};
+  \draw[ptr] (d1) -- (d2); \draw[ptr] (d2) -- (d3); \draw[ptr] (d3) -- (d4); \draw[ptr] (d4) -- (d5);
+  \node[lbl, right=2mm of d2, text=sigc] {\code{lookup n} stops here};
+\end{tikzpicture}
+\caption{The environment in which the body \code{(+ n m)} of \code{add5} runs in \code{ex-e}. Statically it extends the environment saved when \code{(lambda m ...)} was evaluated inside \code{make-adder}, where \code{n} is 5. Dynamically it extends the caller's environment, where the nearest \code{n} is the unrelated 100. In \code{ex-d} the \code{n = 100} cell is missing, so the dynamic lookup reaches \code{empty} and fails.}
+\label{fig:rec5e}
+\end{figure}
+
+Running all six confirms the predictions:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+program & static & dynamic \\
+\midrule
+\code{ex-a-f} & \code{(numV 14)} & \code{(numV 13)} \\
+\code{ex-a-g} & \code{(numV 14)} & \code{(numV 12)} \\
+\code{ex-b} & \code{(numV 10)} & \code{(numV 7)} \\
+\code{ex-c} & \code{lookup: unbound variable: y} & \code{(numV 3)} \\
+\code{ex-d} & \code{(numV 6)} & \code{lookup: unbound variable: n} \\
+\code{ex-e} & \code{(numV 6)} & \code{(numV 101)} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{keypoint}
+Under static scope, the meaning of a free variable in a function is fixed by the program text: you can read it off without knowing who calls the function. Under dynamic scope it depends on the chain of calls at run time, so local names are no longer private (a, b), renaming a local variable can change the result, and a function that outlives its defining call loses its free variables (d) or silently picks up someone else's (e).
+\end{keypoint}
+
+\subsection{Scope with Assignment}
+
+Our language has no assignment, but most languages do, and then a function can \emph{change} the variable a free name refers to. The question is the same as before, which variable does the name denote, and these exercises are worked on paper: for each program, what does it print under static scope, and under dynamic scope?
+
+\begin{exercise}[Assignment, part a]
+\begin{lstlisting}[language=C]
+int x;
+void h() { printf("%d\n", x); }
+void f() { x = 13; h(); }
+void g() { x = 12; h(); }
+int main() { x = 14; f(); g(); }
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+Both scopes print \code{13} then \code{12}. Neither \code{f} nor \code{g} declares a local \code{x}, so there is only one \code{x}, the global one, and the assignments change it before \code{h} reads it. Compare Predict, part a, where \code{f} and \code{g} \emph{declare} locals: static and dynamic scope can disagree only when there is more than one variable with the same name.
+\end{solution}
+
+\begin{exercise}[Assignment, part b]
+This one is bash, which really is dynamically scoped, so you can run it in a terminal:
+\begin{lstlisting}[language=bash]
+x=1
+function g () { echo $x ; x=2 ; }
+function f () { local x=3 ; g ; }
+f
+echo $x
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+Dynamic (what bash does): \code{3} then \code{1}. \code{g} is called from \code{f}, so its \code{x} is \code{f}'s \code{local x}: it prints 3, and \code{x=2} overwrites \emph{\code{f}'s} local. When \code{f} returns, its local disappears and the global \code{x} is still 1. Static: \code{1} then \code{2}. \code{g}'s \code{x} would always be the global: it prints 1 and sets the global to 2, which the last line prints.
+\end{solution}
+
+\begin{exercise}[Assignment, part c]
+From \cite[Chapter~3]{Scott}:
+\begin{lstlisting}[style=repl]
+n : integer                 -- global
+procedure first()
+    n := 1
+procedure second()
+    n : integer             -- local
+    first()
+n := 2
+if read_integer() > 0
+    second()
+else
+    first()
+write_integer(n)
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+Static: \code{1}, whatever is read. \code{first}'s \code{n} is the global one, and \code{first} runs on either branch. Dynamic: \code{2} for a positive input, \code{1} otherwise. Called from \code{second}, \code{first}'s \code{n} is \code{second}'s local, so \code{n := 1} changes that local and the global stays 2. Called from the main program, \code{first} sets the global. The output depends on the input through the scope rule, and nothing in the text of \code{first} shows it.
+\end{solution}
+
+\subsection{Scope and Macros}
+
+The rest of the recitation (\code{macro.rkt}) moves the same question to \emph{macros}. A macro generates code from a shorthand before the program runs. The generated code mentions names, some written in the macro's definition and some supplied at the use, and each must be resolved somewhere.
+
+\subsubsection{Text macros in C} The C preprocessor replaces text. \code{unhygenic.c}:
+\begin{lstlisting}[language=C]
+#include <stdio.h>
+#define SWAP(a, b) do { \
+  int temp = (a);       \
+  (a) = (b);            \
+  (b) = temp;           \
+} while(0)
+
+int main(void) {
+  int x = 10;
+  int y = 20;
+  SWAP(x, y);
+  printf("temp = %d, y = %d\n", x, y);
+  return 0;
+}
+\end{lstlisting}
+
+\begin{exercise}[Running \code{unhygenic.c}]
+Compile and run \code{unhygenic.c} as it is. What does it print?
+\end{exercise}
+\begin{solution}
+\code{temp = 20, y = 10}: the swap works (the label \code{temp} in the format string is just text; the value printed is \code{x}). The \code{do \{ ... \} while(0)} wrapper turns the macro body into one statement, so that \code{SWAP(x, y);} also works as the body of an \code{if} without braces.
+\end{solution}
+
+\begin{exercise}[A strange renaming]
+In the body of \code{main}, rename \code{x} to \code{temp}. Don't compile it yet.
+\end{exercise}
+\begin{solution}
+Every \code{x} in \code{main} becomes \code{temp}:
+\begin{lstlisting}[language=C]
+int main(void) {
+  int temp = 10;
+  int y = 20;
+  SWAP(temp, y);
+  printf("temp = %d, y = %d\n", temp, y);
+  return 0;
+}
+\end{lstlisting}
+\end{solution}
+
+\begin{exercise}[Predicting the behavior]
+Discuss with your neighbor what you \emph{think} the renamed program prints.
+\end{exercise}
+\begin{solution}
+Renaming a local variable consistently should not change what a program does, so the natural prediction is the same output as before: \code{temp = 20, y = 10}.
+\end{solution}
+
+\begin{exercise}[Explaining the behavior]
+Now compile and run the program. Did it do what you expected? Why did it do that?
+\end{exercise}
+\begin{solution}
+No. It prints \code{temp = 10, y = 20}: nothing is swapped. \code{cc -E} shows the expanded code:
+\begin{lstlisting}[language=C]
+int temp = 10;
+int y = 20;
+do { int temp = (temp); (temp) = (y); (y) = temp; } while(0);
+\end{lstlisting}
+The argument \code{temp} is pasted inside the block that declares the macro's own \code{temp}, so every \code{temp} in the block refers to the inner variable: the user's \code{temp} has been \emph{captured}. The inner \code{temp} is initialized from itself, an uninitialized read (undefined behavior), then set to \code{y}, and finally \code{y = temp} copies that value back into \code{y}. The outer \code{temp} is never touched. This is the variable capture of \Cref{sec:lazy}, produced by a text substitution that knows nothing about binding.
+\end{solution}
+
+\begin{definition}[Preserving $\alpha$-equivalence]
+Recall (\Cref{sec:substrev}) that programs $p$ and $q$ are $\alpha$-equivalent, $p \equiv_\alpha q$, if renaming bound variables in $p$ gives $q$. A program transformation $T$, a function from programs to programs, \emph{preserves $\alpha$-equivalence} if
+\[
+  p \equiv_\alpha q \implies T(p) \equiv_\alpha T(q).
+\]
+\end{definition}
+(The handout writes ``if $p \equiv_\alpha p$, then $T(p) \equiv_\alpha p$'', a typo for this.)
+
+\begin{exercise}[Reasoning about $\alpha$-equivalence]
+Consider the C preprocessor as a program transformation: it takes C code and produces C code. Does it preserve $\alpha$-equivalence?
+\end{exercise}
+\begin{solution}
+No. The program with \code{x} and the program with \code{temp} are $\alpha$-equivalent: one renames a local variable of the other. After preprocessing they are not even equivalent in behavior, let alone $\alpha$-equivalent: one swaps and the other does not. A transformation that preserves $\alpha$-equivalence lets the programmer choose names freely; with C macros, the names used inside every macro body are silently reserved.
+\end{solution}
+
+\subsubsection{Hygienic macros in Racket} The same macro in Racket:
+\begin{lstlisting}
+(define-syntax-rule (swap a b)
+  (let ([tmp a])
+    (set! a b)
+    (set! b tmp)))
+\end{lstlisting}
+\code{define-syntax-rule} defines \code{(swap a b)} as a pattern and its expansion as a template. Using the macro's own name for one of the variables does not break it:
+\begin{lstlisting}[style=repl]
+> (define tmp 10)
+> (define y 20)
+> (swap tmp y)
+> (list tmp y)
+'(20 10)
+\end{lstlisting}
+Racket's expander is \emph{hygienic}: the \code{tmp} introduced by the template and the \code{tmp} the user passed in are different variables, even though they print the same. Effectively the macro's \code{tmp} is renamed to a fresh name, as \code{subst} did with \code{gensym} in \Cref{sec:capavoid}, so the expansion is
+\begin{lstlisting}
+(let ([tmp1 tmp]) (set! tmp y) (set! y tmp1))
+\end{lstlisting}
+
+\begin{keypoint}
+Hygiene is static scope for macros. A name written in the macro's template refers to the binding visible where the \emph{macro is defined}; a name passed in by the user refers to the binding visible where the \emph{macro is used}. A text macro like C's resolves every name at the use site, after expansion, which is the macro analogue of dynamic scope, and it has the same symptom: renaming a variable changes what a program does.
+\end{keypoint}
+
+\subsection{A Look at Lean}
+
+The last file, \code{bexp.lean}, revisits the Boolean expressions of \Cref{sec:rec2} in Lean, a functional language whose type checker can also check \emph{proofs}:
+\begin{lstlisting}[style=repl, literate={∧}{{$\land$}}1 {∨}{{$\lor$}}1 {¬}{{$\lnot$}}1 {∀}{{$\forall$}}1]
+inductive BExp where
+  | leaf (b : Bool)
+  | and (l : BExp) (r : BExp)
+  | or (l : BExp) (r : BExp)
+  | not (b : BExp)
+
+def eval (b : BExp) : Bool :=
+  match b with
+  | BExp.leaf b => b
+  | BExp.and l r => eval l ∧ eval r
+  | BExp.or l r => eval l ∨ eval r
+  | BExp.not b => ¬ (eval b)
+
+def opt (b : BExp) : BExp := b
+
+theorem opt_correct : ∀ (b : BExp), eval (opt b) = eval b := by
+  intro b
+  unfold opt
+  exact Bool.le_antisymm (fun a => a) fun a => a
+\end{lstlisting}
+\code{inductive} is \code{define-type}, and \code{eval} is the interpreter of Recitation~2 written with \code{match}. The new part is the \code{theorem}. In Recitation~2 the optimizer was checked by \emph{testing} that \code{(eval (opt b))} equals \code{(eval b)} on chosen examples. Here the same statement is written for \emph{all} \code{b} as a type, and the proof after \code{by} is a program that Lean checks has that type. The handout's \code{opt} is still the identity, so after \code{unfold opt} the goal is \code{eval b = eval b}; the last line proves it from $\le$ in both directions (\code{rfl} would also do). Replacing \code{opt} by the De~Morgan optimizer of \Cref{sec:rec2} would make the theorem say something; its proof would then need induction on \code{b}, one case per constructor.
+
+The rest of the file hints at \emph{dependent types}, types that mention values:
+\begin{itemize}
+  \item \code{BExpProof} packages an expression, a result, and a \code{certificate : eval bexp = result}. A value of this type cannot be built unless the result really is the value of the expression.
+  \item \code{crazy (xs : Array Int) : (if xs.size > 10 then String else Int)} has a return type that depends on the \emph{length} of its argument. A caller can use the result only after finding out which branch holds, which is what \code{if h : xs.size > 10} in \code{crazier} does: \code{h} is a proof of the condition, available inside the branch.
+\end{itemize}
+The bodies are \code{sorry}, Lean's placeholder that type checks as anything; the file shows what can be \emph{stated}, not how to prove it.
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{Defunctionalization} The two environment representations are related by a mechanical transformation. Collect every \code{lambda} that builds an environment (here two, in \code{empty-env} and \code{extend-env}), give each a variant of a data type holding its free variables (\code{empty} with none; \code{extend} with \code{x}, \code{v}, \code{env}), and replace each call of an environment by an \code{apply-env} function that \code{type-case}s on the variant and runs the corresponding body. The result is exactly the list environment of \Cref{sec:env}. This is \emph{defunctionalization}, introduced by Reynolds in the paper that started definitional interpreters~\cite{Reynolds}. It is also how compilers implement first-class functions in languages without them, and why a list environment is ``the same'' interpreter as a function environment.
+
+\subsubsection{Implementing dynamic scope: deep and shallow binding} \code{eval-env} with \code{dynamic?} = \code{\#t} implements dynamic scope by \emph{deep binding}: the current environment is a chain searched from the newest binding. bash and early Lisps instead use \emph{shallow binding}: each name has one global slot holding its current value; \code{local x=3} saves the old value of the slot, overwrites it, and restores it on return. Lookup is then constant time, at the cost of save and restore on every call. That is why \code{g}'s \code{x=2} in Assignment, part b is lost: it overwrote \code{f}'s value in the shared slot, and \code{f}'s return restored the global 1.
+
+\subsubsection{How hygiene is implemented} Early hygienic expanders (Kohlbecker et~al., 1986) renamed every identifier introduced by a macro with a fresh name, as above. Racket's current expander uses \emph{sets of scopes}: each identifier carries a set of scope marks, one per binding form or macro expansion it passed through, and a use refers to the binding whose scope set is the largest subset of the use's. Macro-introduced \code{tmp} and user \code{tmp} get different scope sets, so they never meet. Hygiene can be broken on purpose (\code{datum->syntax}) for macros that are meant to bind a name for the user, such as an anaphoric \code{aif} that binds \code{it}. Common Lisp's \code{defmacro} is unhygienic; there the programmer calls \code{gensym} by hand, exactly as \code{subst} did.
+
+\subsubsection{C workarounds} C code avoids the \code{SWAP} problem by convention: reserved-looking names such as \code{\_\_swap\_tmp}, or, in GCC, \code{\_\_typeof\_\_} with a name built from \code{\_\_LINE\_\_} or \code{\_\_COUNTER\_\_}. None of these is a guarantee, only a name unlikely to be used. The other classic C macro bugs, missing parentheses (\code{\#define SQ(x) x*x} applied to \code{a+1}) and arguments evaluated twice (\code{SQ(i++)}), come from the same source: the preprocessor substitutes text, not expressions.

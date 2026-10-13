@@ -1,0 +1,203 @@
+\section{Store-Passing Style}
+\label{sec:storepass}
+
+\subsection{Locations and the Store}
+
+The indirection is a second table. A box value no longer contains its contents; it contains a \emph{location}, a number that names a cell in a table called the \emph{store}.
+
+\begin{definition}[Location, store]
+A \emph{location} is an address, here a number. The \emph{store} maps locations to values. A box value is a location; its contents are whatever the store currently maps that location to.
+\end{definition}
+So a name now goes through up to two tables: the environment maps the name to a value, and if that value is a box, the store maps the box's location to its contents. The code for the store copies the code for the environment (\Cref{sec:env}) line for line:
+\begin{lstlisting}
+(define-type-alias Location number)
+
+(define-type Storage
+  [cell (l : Location) (val : Value)])
+
+(define-type-alias Store (listof Storage))
+(define empty-store empty)
+(define override-store cons)
+
+(define (fetch (l : Location) (sto : Store)) : Value
+  (cond
+    [(cons? sto)
+     (if (equal? (cell-l (first sto)) l)
+         (cell-val (first sto))
+         (fetch l (rest sto)))]
+    [else (error 'fetch "No location found")]))
+\end{lstlisting}
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+& environment & store \\
+\midrule
+maps & names (\code{symbol}) to values & locations (\code{number}) to values \\
+entry & \code{(bind name val)} & \code{(cell l val)} \\
+add an entry & \code{extend-env} = \code{cons} & \code{override-store} = \code{cons} \\
+look up & \code{lookup}, newest first & \code{fetch}, newest first \\
+\bottomrule
+\end{tabular}
+\end{center}
+\code{fetch} is \code{lookup} with the names changed. Writing to a location does not remove its old cell: \code{override-store} puts a new cell for the same location on the front, and \code{fetch} stops at the first match. The latest write wins in the same way that the innermost binding wins in \code{lookup} (\Cref{fig:envstack}), with shadowing in time instead of shadowing in the program text.
+
+\subsection{Results Carry the Store}
+
+A box value is now a location:
+\begin{lstlisting}
+(define-type Value
+  [numV (n : number)]
+  [closV (env : Env) (x : symbol) (e : Expr)]
+  [boxV (l : Location)])
+\end{lstlisting}
+Evaluating an expression may now change the store, and whoever evaluates next must see the change. So \code{eval-env} takes the current store as an argument and returns, together with the value, the store as it is \emph{after} the evaluation:
+\begin{lstlisting}
+(define-type Result
+  [res (v : Value) (sto : Store)])
+
+(define (eval-env (env : Env) (sto : Store) (e : Expr)) : Result
+  (type-case Expr e
+    [numC (n) (res (numV n) sto)]
+    [lambdaC (x e) (res (closV env x e) sto)]
+    [idC (x) (res (lookup x env) sto)]
+    ...))
+
+(define (eval (e : Expr))
+  (eval-env empty-env empty-store e))
+\end{lstlisting}
+Numbers, \code{lambda}, and names do not touch the store, so they return the store they were given.
+
+\begin{keypoint}[Store-passing style]
+Every evaluation takes the store as input and returns the updated store as output. An effect is no longer something that \emph{happens}; it is a difference between the store that went in and the store that came out. The interpreter itself stays pure: no Racket mutation is needed to explain the language's mutation (with one exception, \code{new-loc} below).
+\end{keypoint}
+
+\subsection{Fresh Locations}
+
+\code{(box e)} needs a location that no existing box uses. The lecture first wrote \code{new-loc} like this, and then commented it out:
+\begin{lstlisting}
+#|
+(define new-loc
+  (let ([b (box 0)])
+    (let ([l (unbox b)])
+      (begin
+        (set-box! b (+ 1 l))
+        l))))
+|#
+\end{lstlisting}
+There is no \code{lambda}, so the right-hand side is evaluated once, when the \code{define} runs: it creates the box, reads 0, sets the box to 1, and returns 0. \code{new-loc} is just the number 0, and the box is never seen again. Asking for \code{new-loc} twice gives 0 both times, and \code{(new-loc)} does not even type check:
+\begin{lstlisting}[style=repl]
+> new-loc
+- number
+0
+> (new-loc)
+typecheck failed: call of a non-function
+\end{lstlisting}
+The fix wraps the body in \code{(lambda () ...)} inside the \code{let}:
+\begin{lstlisting}
+(define new-loc
+  (let ([b (box 0)])
+    (lambda ()
+      (let ([l (unbox b)])
+        (begin
+          (set-box! b (+ 1 l))
+          l)))))
+\end{lstlisting}
+Now the \code{let} runs once and creates one box, and \code{new-loc} is a closure over it; the body runs at every call. This is the counter pattern: \code{make-adder} of \Cref{sec:hof} with a box in place of a number, so the closure's private state can change.
+\begin{lstlisting}[style=repl]
+> (new-loc)
+- number
+0
+> (new-loc)
+- number
+1
+> (new-loc)
+- number
+2
+\end{lstlisting}
+
+\begin{remark}
+\code{new-loc} implements the language's mutation using Racket's: \code{set-box!} on a Racket box. It is the one place where the store-passing interpreter is not pure. Only freshness matters, so the effect is harmless, but the counter is global: it is never reset between programs. Evaluating \code{ex2} twice in one session gives \code{(res (boxV 0) ...)} the first time and \code{(res (boxV 1) ...)} the second, with the same contents. The traces in this chapter are each run in a fresh session, so locations start at 0.
+\end{remark}
+
+\subsection{Threading the Store Through Arithmetic}
+
+\code{plusC} has two subexpressions, either of which may change the store. The clause evaluates \code{e1} in the incoming store \code{sto}, giving \code{sto1}; evaluates \code{e2} in \code{sto1}, giving \code{sto2}; and returns \code{sto2}:
+\begin{lstlisting}
+    [plusC (e1 e2)
+           (let ([r1 (eval-env env sto e1)])
+             (type-case Result r1
+               [res (v1 sto1)
+                    (let ([r2 (eval-env env sto1 e2)])
+                      (type-case Result r2
+                        [res (v2 sto2)
+                             (res (numV (+ (numV-n v1) (numV-n v2))) sto2)]))]))]
+\end{lstlisting}
+\code{type-case Result} is used here only to take a \code{res} apart into its two fields. \code{timesC} is the same with \code{*}. The store is \emph{threaded}: each evaluation's output store is the next one's input (\Cref{fig:thread}), while \code{env} is passed unchanged to both operands, as before.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm, y=1cm]
+  \node[cell, fill=greybg, minimum width=10mm] (s0) at (0,0) {sto};
+  \node[box, fill=kspace, font=\ttfamily] (e1) at (2.4,0) {eval e1};
+  \node[cell, fill=greybg, minimum width=10mm] (s1) at (4.8,0) {sto1};
+  \node[box, fill=kspace, font=\ttfamily] (e2) at (7.2,0) {eval e2};
+  \node[cell, fill=greybg, minimum width=10mm] (s2) at (9.6,0) {sto2};
+  \draw[arr] (s0) -- (e1); \draw[arr] (e1) -- (s1);
+  \draw[arr] (s1) -- (e2); \draw[arr] (e2) -- (s2);
+  \node[cell, fill=uspace, minimum width=10mm] (env) at (4.8,1.5) {env};
+  \draw[ptr, densely dashed] (env) -| (e1);
+  \draw[ptr, densely dashed] (env) -| (e2);
+  \node[lbl, below=1mm of e1] {value \code{v1}};
+  \node[lbl, below=1mm of e2] {value \code{v2}};
+  \node[lbl, below=1mm of s2, align=center] {returned with\\ \code{(numV (+ v1 v2))}};
+\end{tikzpicture}
+\caption{Threading the store through \code{(+ e1 e2)}. The store flows through the operands in sequence; the environment is handed to both unchanged.}
+\label{fig:thread}
+\end{figure}
+
+\begin{pitfall}[Passing the wrong store]
+Every store has type \tyname{Store}, so the type checker accepts any of \code{sto}, \code{sto1}, \code{sto2} in any position. Two plausible slips in \code{plusC} are evaluating \code{e2} in \code{sto}, and returning \code{sto1}. Each is caught by a program that writes to a box inside one operand (these variants are not lecture code):
+\begin{lstlisting}
+(let b (box 0) (+ (begin (set-box! b 5) 0) (unbox b)))   ; P1
+(let b (box 0) (begin (+ 0 (begin (set-box! b 5) 0)) (unbox b)))   ; P2
+\end{lstlisting}
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+program & lecture \code{plusC} & \code{e2} gets \code{sto} & returns \code{sto1} \\
+\midrule
+P1 & \code{(numV 5)} & \textcolor{sigc}{\code{(numV 0)}} & \code{(numV 5)} \\
+P2 & \code{(numV 5)} & \code{(numV 5)} & \textcolor{sigc}{\code{(numV 0)}} \\
+\bottomrule
+\end{tabular}
+\end{center}
+Evaluating \code{e2} in \code{sto} makes \code{e2} blind to \code{e1}'s writes; returning \code{sto1} forgets \code{e2}'s writes once the addition is over. Each store must be used exactly once, by the next step.
+\end{pitfall}
+
+\subsection{\texttt{let} Is Application, Again}
+
+\code{letC} would need the same threading: evaluate \code{e1} in \code{sto}, then the body in the resulting store. The lecture avoids writing it by turning \code{let} into application, the equation of \Cref{sec:substrev}:
+\begin{lstlisting}
+    [letC (x e1 e2) (eval-env env sto (appC (lambdaC x e2) e1))]
+\end{lstlisting}
+The rewriting happens in \code{eval-env} rather than in \code{parse}, but the effect is the same: the store is threaded through \code{let} by the code for \code{appC}, written once. The equation is valid here because both \code{let} and application are eager.
+
+\subsection{Application}
+
+\code{appC} evaluates the function in \code{sto} and the argument in \code{sto1}, as \code{plusC} did, and then runs the body:
+\begin{lstlisting}
+    [appC (e1 e2)
+          (type-case Result (eval-env env sto e1)
+            [res (v1 sto1)
+                 (type-case Result (eval-env env sto1 e2)
+                   [res (v2 sto2)
+                        (eval-env (extend-env (bind (closV-x v1) v2) (closV-env v1))
+                                  sto2
+                                  (closV-e v1))])])]
+\end{lstlisting}
+The body gets its environment and its store from different places. The environment is the closure's, \code{(closV-env v1)}, extended with the parameter: lexical scope, unchanged from \code{lecture5e.rkt}, whose comment the clause keeps (``we're going to use and extend the saved environment from the closure, instead of the current environment''). The store is \code{sto2}, the \emph{current} one. A closure saves an environment but no store, and \code{closV} has no field for one.
+
+\begin{keypoint}[Environment vs.\ store]
+The environment follows the program text: it is saved in closures and restored when they are called, so a name means what it meant where it was written. The store follows time: it is passed from each step to the next in execution order and is never saved or restored, so a box's contents are whatever was last written, wherever the reading code was written.
+\end{keypoint}
+If closures saved the store too, \code{f} in \code{ex5} would read \code{a} in the store of the moment \code{f} was created, where it holds 1, and \code{ex5} would give 11, the wrong answer of Attempt 1. \Cref{sec:storeboxes} traces \code{ex5} and draws both tables.

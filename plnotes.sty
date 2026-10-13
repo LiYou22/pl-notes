@@ -67,6 +67,11 @@
   aboveskip=8pt,
   belowskip=8pt,
 }
+% Never break a listing across pages (9999 still loses to a short page).
+% A listing taller than a page would overflow; split it by hand.
+\makeatletter
+\lst@AddToHook{EveryPar}{\vadjust{\penalty\@M}}
+\makeatother
 % REPL transcripts and traces: no keyword highlighting
 \lstdefinestyle{repl}{language={}, basicstyle=\ttfamily\small, frame=leftline, framerule=1.2pt, rulecolor=\color{accent!50}}
 \newcommand{\rkt}{\lstinline[language=Racket,basicstyle=\ttfamily,keywordstyle={}]}

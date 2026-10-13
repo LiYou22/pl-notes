@@ -1,0 +1,133 @@
+\section{Substitution Revisited}
+\label{sec:substrev}
+
+\subsection{The Starting Point}
+
+The lecture opened where week~4 ended: the eager interpreter with functions, \code{eval-eager-v3} of \Cref{sec:eagerapp}. A call evaluates the function and the argument, then substitutes the argument's value into the body with the capture-avoiding \code{subst-lazy-v2} of \Cref{sec:capavoid}; function values are written \code{(lambdaV x e)} in lecture, \code{funV} in week~4. On the board the two binding forms were
+\begin{lstlisting}
+    [letC (y e1 e2)
+          (eval (subst e1 y e2))]
+    [appC (e1 e2)
+          (let ([v1 (eval e1)]
+                [v2 (eval e2)])
+            (eval (subst (val->expr v2) (lambdaV-x v1) (lambdaV-e v1))))]
+\end{lstlisting}
+where \code{val->expr} turns a value back into an expression, as \code{value->expr} did in week~4.
+
+\begin{remark}
+The \code{letC} line above is a \emph{lazy} \code{let} next to an \emph{eager} application. The substitution interpreter kept for comparison in \code{lecture5a.rkt} (\Cref{sec:envcheck}) evaluates \code{e1} first, and the rest of this chapter takes \code{let} to be eager whenever application is. Mixing the two strategies would break the equation of the next subsection.
+\end{remark}
+
+\subsection{\texttt{let} Is Function Application}
+
+\begin{keypoint}[\code{let} desugars to \code{lambda}]
+\[
+\code{(let x e1 e2)} \quad\text{means}\quad \code{((lambda x e2) e1)}.
+\]
+``Call \code{e1} by the name \code{x} while computing \code{e2}'' is the same as ``make the function with parameter \code{x} and body \code{e2}, and call it on \code{e1}''.
+\end{keypoint}
+
+Both sides evaluate \code{e1}, substitute it for \code{x} in \code{e2}, and evaluate the result:
+\begin{lstlisting}[style=repl]
+(let x 5 (+ x x))           ((lambda x (+ x x)) 5)
+---> (+ 5 5)                ---> (+ 5 5)
+---> 10                     ---> 10
+\end{lstlisting}
+So \code{letC} is not needed in the core language: \code{parse} could turn every \code{let} into an \code{appC} of a \code{lambdaC}, and \code{eval} and \code{subst} would lose a case each. This is \emph{desugaring}, as in the supplement of \Cref{sec:calc}. The equation holds only if \code{let} and application use the same strategy, both eager or both lazy. With a lazy \code{let} and an eager call, \code{(let x (+ y y) 10)} is 10 but \code{((lambda x 10) (+ y y))} is an unbound-variable error.
+
+\subsection{Capture, Once More}
+
+The lecture's capture example, written on the board:
+\begin{lstlisting}
+(let x (+ 1 y) (let y 2 (+ x y)))
+\end{lstlisting}
+Nothing binds the first \code{y}, so the right answer is an unbound-variable error (\Cref{fig:capture5}). With a lazy \code{let}, \code{(+ 1 y)} is substituted unevaluated for \code{x}, and the question is what happens to its \code{y} when it lands inside \code{(let y 2 ...)}:
+\begin{lstlisting}[style=repl]
+without renaming (subst-lazy):
+---> (let y 2 (+ (+ 1 y) y))      the free y is captured
+---> (+ (+ 1 2) 2)
+---> 5                            wrong
+
+with renaming (subst-lazy-v2):
+---> (let z 2 (+ (+ 1 y) z))      inner y renamed to a fresh z first
+---> (+ (+ 1 y) 2)
+---> unbound variable             right
+\end{lstlisting}
+The second trace is the line \code{(let z 2 (+ (+ 1 y) z))} from the board. It is the week~4 example \code{(let x y (let y 2 (+ x y)))} with \code{y} replaced by \code{(+ 1 y)}: any substituted expression that has a free variable can be captured, however complicated it is. An eager \code{let} reports the error even earlier, while evaluating \code{(+ 1 y)} before any substitution.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[tok/.style={inner sep=0pt, font=\ttfamily\normalsize, anchor=base west}]
+  \node[tok] at (0,0) {(let x (+ 1 y) (let y 2 (+ x y)))};
+  \node[tok] (bx) at (5\cw,0) {\phantom{x}};
+  \node[tok] (fy) at (12\cw,0) {\phantom{x}};
+  \node[tok] (by) at (20\cw,0) {\phantom{x}};
+  \node[tok] (ux) at (27\cw,0) {\phantom{x}};
+  \node[tok] (uy) at (29\cw,0) {\phantom{x}};
+  \draw[bind] (ux.south) to[out=-110, in=-70] (bx.south);
+  \draw[bind] (uy.south) to[out=-110, in=-70] (by.south);
+  \node[lbl, above=1mm of fy, text=sigc] {free: bound by nothing};
+  \node[lbl, below=15mm of fy, text=accent] {each use points to the nearest enclosing binder};
+\end{tikzpicture}
+\caption{Lexical binding structure of the board example. The \code{y} inside \code{(+ 1 y)} is free; a correct substitution must keep it free after moving it under \code{(let y 2 ...)}.}
+\label{fig:capture5}
+\end{figure}
+
+\subsection{The Lambda Calculus}
+
+Delete \code{numC}, \code{plusC}, \code{timesC}, and \code{letC} from the expression type. What remains is Church's \emph{lambda calculus} (1936), usually written with $\lambda$:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+lambda calculus & our syntax & abstract syntax \\
+\midrule
+$x$ & \code{x} & \code{idC} \\
+$\lambda x.\,e$ & \code{(lambda x e)} & \code{lambdaC} \\
+$e_1\ e_2$ & \code{(e1 e2)} & \code{appC} \\
+\bottomrule
+\end{tabular}
+\end{center}
+It has a single computation rule, \emph{$\beta$-reduction}:
+\[
+(\lambda x.\,e)\ e_2 \;\step\; \subst{e}{e_2}{x},
+\]
+which is the \code{appC} case of the lazy interpreter: substitute the argument for the parameter. Despite having nothing but functions, the lambda calculus can express every computation: numbers, Booleans, pairs, and recursion can all be encoded as functions (supplement below). The \code{let} desugaring above is the first such encoding: a \code{let} is a $\beta$-redex.
+
+\subsection{$\alpha$-Equivalence}
+
+\begin{definition}[$\alpha$-equivalence]
+Two expressions are \emph{$\alpha$-equivalent} if they differ only in the names of bound variables, renamed consistently together with their uses. Free variables must stay as they are.
+\end{definition}
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+& & \\[-8pt]
+\code{(lambda x (+ x 1))} & \code{(lambda y (+ y 1))} & $\alpha$-equivalent \\
+\code{(let y 2 (+ x y))} & \code{(let z 2 (+ x z))} & $\alpha$-equivalent \\
+\code{(lambda x (+ x y))} & \code{(lambda x (+ x z))} & \emph{not}: \code{y} and \code{z} are free \\
+\code{(lambda x (lambda y x))} & \code{(lambda y (lambda y y))} & \emph{not}: renaming \code{x} to \code{y} caused capture \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{keypoint}[Why $\alpha$-equivalence matters for the interpreter]
+$\alpha$-equivalent programs must give the same answer: the names of bound variables are the programmer's choice and carry no meaning. This principle does two jobs in week~4:
+\begin{itemize}
+  \item It \emph{detects} the capture bug. \code{(let x y (let y 2 (+ x y)))} and \code{(let x y (let z 2 (+ x z)))} are $\alpha$-equivalent, yet capturing substitution gives 4 for one and an error for the other.
+  \item It \emph{licenses} the fix. Renaming a bound \code{y} to a fresh \code{gensym} produces an $\alpha$-equivalent program, so \code{subst} may rename whenever it likes.
+\end{itemize}
+\end{keypoint}
+
+The same test will expose the bug in \Cref{sec:dynscope}: renaming the inner \code{x} to \code{z} in \code{(let x 1 (let y x (let x 2 (+ y y))))} changes the answer of the first lazy environment interpreter, so that interpreter is wrong.
+
+\subsection{(SUPPLEMENT) Further Topics}
+
+\subsubsection{Church encodings} Numbers can be represented as functions: the numeral $n$ is ``apply $f$ $n$ times'', $\bar n = \lambda f.\,\lambda x.\,f(\cdots(f\,x))$. So $\bar 2$ is \code{(lambda f (lambda x (f (f x))))}, the \code{do-twice} of week~4 with the starting value abstracted. Addition is $\lambda m.\,\lambda n.\,\lambda f.\,\lambda x.\,m\,f\,(n\,f\,x)$: do $f$ $n$ times, then $m$ more. Booleans are choosers, $\mathit{true} = \lambda t.\,\lambda f.\,t$ and $\mathit{false} = \lambda t.\,\lambda f.\,f$, so ``if'' is just application. These are not efficient, but they show that \code{numC} and \code{plusC} add convenience, not power.
+
+\subsubsection{Recursion without names} The lambda calculus has no \code{define}, so a function cannot call itself by name. Recursion is recovered with a \emph{fixed-point combinator}
+\[
+Y = \lambda f.\,(\lambda x.\,f\,(x\,x))\,(\lambda x.\,f\,(x\,x)), \qquad Y\,g =_\beta g\,(Y\,g),
+\]
+so $Y\,g$ is a fixed point of $g$: passing it a function that expects ``itself'' as an argument produces a recursive function. Under eager evaluation $Y\,g$ loops before $g$ is ever called, and the variant $Z = \lambda f.\,(\lambda x.\,f\,(\lambda v.\,x\,x\,v))\,(\lambda x.\,f\,(\lambda v.\,x\,x\,v))$, which delays $x\,x$ behind a $\lambda$, is used instead~\cite[Section~5.2]{TAPL}.
+
+\subsubsection{$\alpha$-equivalence, formally} $\alpha$-equivalence is the smallest equivalence relation, compatible with the syntax, that contains $\lambda x.\,e \equiv_\alpha \lambda y.\,\subst{e}{y}{x}$ whenever $y \notin \FV(e)$. The side condition is exactly what rules out the last row of the table above. Formal treatments identify $\alpha$-equivalent terms, which is why the textbook definition of substitution can always assume that bound names are fresh (\Cref{sec:capavoid}).

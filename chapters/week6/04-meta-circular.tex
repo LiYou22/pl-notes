@@ -1,0 +1,97 @@
+\section{The Meta-Circular Interpreter}
+\label{sec:metacirc}
+
+\subsection{Boxes Implemented by Boxes}
+
+The store-passing interpreter needed a new type, a new argument and result for \code{eval-env}, and a rewrite of every clause. The lecture's second file starts again from the starting file and takes a shortcut: the object language's boxes are implemented with Racket's boxes.
+
+\begin{definition}[Meta-circular interpreter]
+An interpreter is \emph{meta-circular} when it implements a feature of the language it interprets by the same feature of the language it is written in. SICP uses the word for an evaluator written in the language that it evaluates~\cite[Section~4.1]{SICP}; here the word applies to one feature, boxes.
+\end{definition}
+
+A box value holds a Racket box of values, \code{(boxof Value)}. \code{eval-env} goes back to the signature of \code{lecture5e.rkt}, \code{(env e) : Value}, with no store, and every old clause is unchanged:
+\begin{lstlisting}
+(define-type Value
+  [numV (n : number)]
+  [closV (env : Env) (x : symbol) (e : Expr)]
+  [boxV (b : (boxof Value))])
+
+    [boxC (e)
+          (boxV (box (eval-env env e)))]
+    [unboxC (e)
+            (unbox (boxV-b (eval-env env e)))]
+    [setboxC (e1 e2)
+             (let ([v1 (eval-env env e1)]
+                   [v2 (eval-env env e2)])
+               (begin
+                 (set-box! (boxV-b v1) v2)
+                 v1))]
+    [seqC (e1 e2)
+          (begin
+            (eval-env env e1)
+            (eval-env env e2))]
+\end{lstlisting}
+Each clause does in Racket what the construct does in the object language. \code{(box e)} makes a Racket box holding the value of \code{e} and wraps it in \code{boxV}. \code{unbox} unwraps and reads it. \code{set-box!} evaluates the box and the new contents and mutates the Racket box; like the store-passing version, it returns the box \code{v1}. \code{seqC} is Racket's \code{begin}.
+
+\begin{remark}
+Once all eleven variants have clauses, the starting file's \code{else} clause can never be reached, and \code{plai-typed} rejects the program: ``the else branch of this type-case is unreachable''. Deleting the \code{else} fixes it.
+\end{remark}
+
+Compare this \code{setboxC} with Attempt~1's. There, \code{boxV} contained a \tyname{Value} directly, and \code{set-box!} could only build a new \code{boxV}. Here \code{boxV} contains a Racket box, a reference to a mutable cell. Copying the \code{boxV} into an environment or a closure copies the reference, not the cell, so every copy sees the same contents. This is the indirection of \Cref{sec:stateboxes}, supplied by Racket. The results agree with the store-passing interpreter on all five examples:
+\begin{lstlisting}[style=repl]
+> (eval ex1)
+- Value
+(numV 4)
+> (eval ex2)
+- Value
+(boxV (box (numV 1)))
+> (eval ex3)
+- Value
+(numV 0)
+> (eval ex4)
+- Value
+(numV 2)
+> (eval ex5)
+- Value
+(numV 12)
+\end{lstlisting}
+In \code{ex5}, the closure for \code{f} saves an environment in which \code{a} is bound to a \code{boxV} holding a Racket box; \code{(set-box! a 2)} mutates that Racket box, and the call reads it.
+
+\subsection{Side by Side}
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{0.2\linewidth}p{0.36\linewidth}p{0.36\linewidth}@{}}
+\toprule
+& store-passing & meta-circular \\
+\midrule
+box value & \code{(boxV l)}, a location & \code{(boxV b)}, a Racket box \\
+contents live in & the store, an explicit list of cells & Racket's heap \\
+\code{eval-env} & \code{(env sto e) : Result} & \code{(env e) : Value} \\
+\code{set-box!} & adds a cell to the store it returns & Racket's \code{set-box!} \\
+\code{begin} & passes \code{sto1} from \code{e1} to \code{e2} & Racket's \code{begin} \\
+order of evaluation & forced by the store: \code{e2} needs \code{sto1} & whatever Racket does \\
+Racket mutation used & only in \code{new-loc} & for every box operation \\
+old clauses & all rewritten to thread the store & unchanged \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{What Each Version Explains}
+
+The meta-circular interpreter is much shorter, and it is correct, but it explains mutation \emph{by} mutation. Someone who does not already know what \code{set-box!} does learns nothing from \code{[setboxC ... (set-box! (boxV-b v1) v2) ...]}. Two things in particular are inherited from Racket without appearing in the code:
+\begin{itemize}
+  \item \textbf{The store.} Where the contents of a box live, and what happens to them over time, is Racket's business. The store-passing interpreter writes the store down as a value that can be printed, as in the \code{(res ...)} results above.
+  \item \textbf{The order of evaluation.} In \code{setboxC}, \code{e1} is evaluated before \code{e2} only because Racket's \code{let} evaluates its right-hand sides left to right; in \code{plusC}, only because Racket evaluates the arguments of \code{+} left to right. In the store-passing interpreter the order is forced by data dependencies: \code{e2} cannot be evaluated until \code{sto1} exists, and \code{sto1} is produced by evaluating \code{e1}.
+\end{itemize}
+Once there is mutation, order matters. Consider (not a lecture example) the program
+\begin{lstlisting}
+(let b (box 1) (+ (unbox b) (begin (set-box! b 10) (unbox b))))
+\end{lstlisting}
+Both interpreters give \code{(numV 11)}: the left operand reads 1 before the right operand writes 10. Evaluating the right operand first would give 20. Without mutation the two orders could never be told apart; with it, the order is part of the meaning of \code{+}, and the meta-circular interpreter specifies it only by reference to Racket. Reynolds pointed out this kind of dependence: a definitional interpreter can silently inherit the evaluation order of the language it is written in~\cite{Reynolds}.
+
+\begin{keypoint}[What an interpreter explains]
+An interpreter explains a feature only if it implements it with something simpler. Week~5 implemented environments with Racket lists and \code{plusC} with Racket's \code{+}; that was fine, because lists and addition were not what was being studied, and scope was implemented explicitly. This week the object of study is mutation, so implementing it with Racket's mutation is circular. The store-passing interpreter explains mutation with immutable lists and function arguments and results, and in doing so also makes evaluation order explicit.
+\end{keypoint}
+
+There is one remaining circle in the store-passing interpreter: \code{new-loc} uses a Racket box. It is not essential: \code{new-loc} only has to produce a location not yet in the store, and a counter threaded alongside the store would do. It is the same kind of shortcut as \code{gensym} in week~4 (\Cref{sec:capavoid}), a source of fresh names rather than the subject of the lecture.
