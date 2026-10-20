@@ -1,18 +1,18 @@
 \section{Recitation 5: Environments as Functions, Scope, and Macros}
 \label{sec:rec5}
 
-Lecture~5 built environment interpreters twice, and twice the first attempt had dynamic scope (\Cref{sec:dynscope,sec:closures}). This recitation comes back to the same material from four sides:
+Environment interpreters were built twice in this chapter, and twice the first attempt had dynamic scope (\Cref{sec:dynscope,sec:closures}). This section comes back to the same material from four sides:
 \begin{enumerate}
   \item a second representation of environments, as \emph{functions} instead of lists;
   \item one interpreter with a flag \code{dynamic?} that runs any program under either scope;
   \item small programs whose result depends on the scope, to predict and then check;
   \item scope in languages with assignment, and scope in \emph{macros}, where the static/dynamic question comes back as \emph{hygiene}.
 \end{enumerate}
-The handout files are \code{recitation5.rkt} (parts 1--4), \code{macro.rkt} with \code{unhygenic.c} (macros), and \code{bexp.lean} (a short look at Lean). No TA solutions have been posted yet. The code below is my completed handout, and every result in this section comes from running it.
+The section ends with a short look at Lean. Every result in this section comes from running the code shown.
 
 \subsection{The Language}
 
-The language is that of \code{lecture5e.rkt}: numbers, \code{+}, \code{*}, \code{let}, one-argument \code{lambda}, and application.
+The language is that of version 5e (\Cref{sec:closures}): numbers, \code{+}, \code{*}, \code{let}, one-argument \code{lambda}, and application.
 \begin{lstlisting}
 (define-type Expr
   [numC (n : number)]
@@ -27,7 +27,7 @@ The language is that of \code{lecture5e.rkt}: numbers, \code{+}, \code{*}, \code
   [numV (n : number)]
   [closV (env : Env) (x : symbol) (e : Expr)])
 \end{lstlisting}
-\code{parse} is the lecture's. A list whose head is not \code{+}, \code{*}, \code{lambda}, or \code{let} is an application, whether the head is some other symbol, as in \code{(f 0)}, or another list, as in \code{((lambda x x) 3)}. Since every function takes exactly one argument, a function that needs none takes a dummy argument \code{\_} and is called with \code{0}.
+\code{parse} is unchanged. A list whose head is not \code{+}, \code{*}, \code{lambda}, or \code{let} is an application, whether the head is some other symbol, as in \code{(f 0)}, or another list, as in \code{((lambda x x) 3)}. Since every function takes exactly one argument, a function that needs none takes a dummy argument \code{\_} and is called with \code{0}.
 
 \subsection{Environments as Functions}
 
@@ -37,7 +37,7 @@ In \Cref{sec:env} an environment was a list of bindings, and \code{lookup} walke
 \end{lstlisting}
 Given a name, the environment returns \rkt|(some v)| if the name is bound to \code{v} and \rkt|(none)| if it is unbound. \code{optionof} is plai-typed's built-in ``maybe'' type, with the two variants \code{some} and \code{none}. \tyname{Env} and \tyname{Value} refer to each other (a closure holds an environment, an environment returns values), which \code{define-type} allows across definitions.
 
-\subsubsection{The three operations} The handout leaves three definitions to fill in.
+\subsubsection{The three operations} Three definitions are needed.
 
 \begin{exercise}[The empty environment]
 Define \code{empty-env : Env}, the environment in which nothing is bound.
@@ -61,7 +61,7 @@ Define \code{(extend-env x v env)}, which binds \code{x} to \code{v} on top of \
         (some v)
         (env y))))
 \end{lstlisting}
-Asked about \code{x}, the name it binds, the new function answers \code{v}. Asked about any other name, it passes the question on to the environment it extends. The old \code{env} is captured in the closure that \code{lambda} builds, so this is a closure in Racket, the very thing \code{closV} implements in our language. Unlike the lecture's \code{extend-env}, which took a \tyname{Binding}, this one takes the name and value directly; there is no \tyname{Binding} type at all.
+Asked about \code{x}, the name it binds, the new function answers \code{v}. Asked about any other name, it passes the question on to the environment it extends. The old \code{env} is captured in the closure that \code{lambda} builds, so this is a closure in Racket, the very thing \code{closV} implements in our language. Unlike the \code{extend-env} of \Cref{sec:env}, which took a \tyname{Binding}, this one takes the name and value directly; there is no \tyname{Binding} type at all.
 \end{solution}
 
 \begin{exercise}[\code{lookup}]
@@ -78,12 +78,12 @@ Define \code{(lookup x env)}, which returns the value bound to \code{x} in \code
 \end{solution}
 
 \begin{pitfall}[\code{type-case} syntax: plai-typed is not plait]
-My first version of \code{lookup} wrote the clauses as \rkt|[(some v) v]| and \rkt|[(none) ...]|, and the type as \code{(Optionof Value)}. The file then does not even compile:
+Writing the clauses of \code{lookup} as \rkt|[(some v) v]| and \rkt|[(none) ...]|, and the type as \code{(Optionof Value)}, gives a program that does not even compile:
 \begin{lstlisting}[style=repl]
 type-case: expected an identifier from a define-type
   at: (some v)
 \end{lstlisting}
-That is the syntax of \code{\#lang plait}, the successor of plai-typed used in newer PLAI courses. In \code{\#lang plai-typed} a clause is the variant name followed by a parenthesized list of field names, \rkt|[some (v) ...]| and \rkt|[none () ...]|, exactly as in every \code{type-case} on \tyname{Expr} so far; the type is written in lower case, \code{optionof}.
+That is the syntax of \code{\#lang plait}, the successor of plai-typed. In \code{\#lang plai-typed} a clause is the variant name followed by a parenthesized list of field names, \rkt|[some (v) ...]| and \rkt|[none () ...]|, exactly as in every \code{type-case} on \tyname{Expr} so far; the type is written in lower case, \code{optionof}.
 \end{pitfall}
 
 \begin{figure}[htbp]
@@ -97,11 +97,11 @@ That is the syntax of \code{\#lang plait}, the successor of plai-typed used in n
   \draw[ptr] (e1) -- node[above, lbl] {else} (e0);
   \draw[ptr] (e0) -- node[right, lbl] {else} (em);
 \end{tikzpicture}
-\caption{\code{env-1} and \code{env-2} from the handout, as chains of closures. Each \code{extend-env} wraps the previous environment; a lookup enters at the left and moves right until some layer recognizes the name. \code{(lookup 'x env-2)} stops at the first box (3), and \code{env-1}, still reachable on its own, answers 1.}
+\caption{\code{env-1} and \code{env-2} as chains of closures. Each \code{extend-env} wraps the previous environment; a lookup enters at the left and moves right until some layer recognizes the name. \code{(lookup 'x env-2)} stops at the first box (3), and \code{env-1}, still reachable on its own, answers 1.}
 \label{fig:fnenv}
 \end{figure}
 
-\subsubsection{Tests} The handout builds two environments (\Cref{fig:fnenv}):
+\subsubsection{Tests} We build two environments (\Cref{fig:fnenv}):
 \begin{lstlisting}
 (define env-1 (extend-env 'x (numV 1) (extend-env 'y (numV 2) empty-env)))
 (define env-2 (extend-env 'x (numV 3) env-1))
@@ -137,7 +137,7 @@ In exchange, the function representation commits to nothing: any function of typ
 
 \subsection{One Interpreter, Two Scopes}
 
-The handout gives \code{lecture5e.rkt}'s interpreter on the new environments, with one extra argument \code{dynamic?}: \code{\#f} for static scope (as in \code{lecture5e.rkt}), \code{\#t} for dynamic scope (as in \code{lecture5d.rkt}). Every case except \code{appC} is written, and is the same for both scopes:
+Here is the interpreter of version 5e on the new environments, with one extra argument \code{dynamic?}: \code{\#f} for static scope (as in 5e), \code{\#t} for dynamic scope (as in 5d). Every case except \code{appC} is written, and is the same for both scopes:
 \begin{lstlisting}
 (define (eval-env (dynamic? : boolean) (env : Env) (e : Expr)) : Value
   (type-case Expr e
@@ -185,10 +185,10 @@ dynamic (\code{dynamic?} = \code{\#t}) & \code{env}, the current environment & w
 \bottomrule
 \end{tabular}
 \end{center}
-That one \code{if} is the whole difference between \code{lecture5d.rkt} and \code{lecture5e.rkt}. In dynamic mode the closure still saves \code{cenv}, but nothing ever reads it, so a \code{closV} there is just the \code{lambdaV} of \Cref{sec:closures}. The \code{else} clause catches a call of a number, such as \code{(1 2)}, which raises \code{eval-env: not a function} in both modes.
+That one \code{if} is the whole difference between 5d and 5e. In dynamic mode the closure still saves \code{cenv}, but nothing ever reads it, so a \code{closV} there is just the \code{lambdaV} of \Cref{sec:closures}. The \code{else} clause catches a call of a number, such as \code{(1 2)}, which raises \code{eval-env: not a function} in both modes.
 \end{solution}
 
-The example from the end of lecture (\Cref{fig:addx}) gives one answer per scope:
+The \code{addx} example (\Cref{fig:addx}) gives one answer per scope:
 \begin{lstlisting}
 (define lecture-example
   '(let x 2
@@ -199,7 +199,7 @@ The example from the end of lecture (\Cref{fig:addx}) gives one answer per scope
 (test (eval-static lecture-example) (numV 5))   ; x from where addx was written
 (test (eval-dynamic lecture-example) (numV 9))  ; x from where addx was called
 \end{lstlisting}
-All seven tests in the file pass.
+All seven tests pass.
 
 \subsection{Predict, Then Check}
 
@@ -392,7 +392,7 @@ Static: \code{1}, whatever is read. \code{first}'s \code{n} is the global one, a
 
 \subsection{Scope and Macros}
 
-The rest of the recitation (\code{macro.rkt}) moves the same question to \emph{macros}. A macro generates code from a shorthand before the program runs. The generated code mentions names, some written in the macro's definition and some supplied at the use, and each must be resolved somewhere.
+The rest of the section moves the same question to \emph{macros}. A macro generates code from a shorthand before the program runs. The generated code mentions names, some written in the macro's definition and some supplied at the use, and each must be resolved somewhere.
 
 \subsubsection{Text macros in C} The C preprocessor replaces text. \code{unhygenic.c}:
 \begin{lstlisting}[language=C]
@@ -461,7 +461,6 @@ Recall (\Cref{sec:substrev}) that programs $p$ and $q$ are $\alpha$-equivalent, 
   p \equiv_\alpha q \implies T(p) \equiv_\alpha T(q).
 \]
 \end{definition}
-(The handout writes ``if $p \equiv_\alpha p$, then $T(p) \equiv_\alpha p$'', a typo for this.)
 
 \begin{exercise}[Reasoning about $\alpha$-equivalence]
 Consider the C preprocessor as a program transformation: it takes C code and produces C code. Does it preserve $\alpha$-equivalence?
@@ -518,11 +517,11 @@ theorem opt_correct : ∀ (b : BExp), eval (opt b) = eval b := by
   unfold opt
   exact Bool.le_antisymm (fun a => a) fun a => a
 \end{lstlisting}
-\code{inductive} is \code{define-type}, and \code{eval} is the interpreter of Recitation~2 written with \code{match}. The new part is the \code{theorem}. In Recitation~2 the optimizer was checked by \emph{testing} that \code{(eval (opt b))} equals \code{(eval b)} on chosen examples. Here the same statement is written for \emph{all} \code{b} as a type, and the proof after \code{by} is a program that Lean checks has that type. The handout's \code{opt} is still the identity, so after \code{unfold opt} the goal is \code{eval b = eval b}; the last line proves it from $\le$ in both directions (\code{rfl} would also do). Replacing \code{opt} by the De~Morgan optimizer of \Cref{sec:rec2} would make the theorem say something; its proof would then need induction on \code{b}, one case per constructor.
+\code{inductive} is \code{define-type}, and \code{eval} is the interpreter of \Cref{sec:rec2} written with \code{match}. The new part is the \code{theorem}. In \Cref{sec:rec2} the optimizer was checked by \emph{testing} that \code{(eval (opt b))} equals \code{(eval b)} on chosen examples. Here the same statement is written for \emph{all} \code{b} as a type, and the proof after \code{by} is a program that Lean checks has that type. Here \code{opt} is still the identity, so after \code{unfold opt} the goal is \code{eval b = eval b}; the last line proves it from $\le$ in both directions (\code{rfl} would also do). Replacing \code{opt} by the De~Morgan optimizer of \Cref{sec:rec2} would make the theorem say something; its proof would then need induction on \code{b}, one case per constructor.
 
-The rest of the file hints at \emph{dependent types}, types that mention values:
+The rest of the example hints at \emph{dependent types}, types that mention values:
 \begin{itemize}
   \item \code{BExpProof} packages an expression, a result, and a \code{certificate : eval bexp = result}. A value of this type cannot be built unless the result really is the value of the expression.
   \item \code{crazy (xs : Array Int) : (if xs.size > 10 then String else Int)} has a return type that depends on the \emph{length} of its argument. A caller can use the result only after finding out which branch holds, which is what \code{if h : xs.size > 10} in \code{crazier} does: \code{h} is a proof of the condition, available inside the branch.
 \end{itemize}
-The bodies are \code{sorry}, Lean's placeholder that type checks as anything; the file shows what can be \emph{stated}, not how to prove it.
+The bodies are \code{sorry}, Lean's placeholder that type checks as anything; the example shows what can be \emph{stated}, not how to prove it.

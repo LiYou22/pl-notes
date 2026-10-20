@@ -1,7 +1,7 @@
 \section{Recitation 1: Functional Programming in Racket}
 \label{sec:rec1}
 
-The recitation practices the basics of the lecture in DrRacket, on a running example about traffic lights. The handout is itself a program: it is written in \code{\#lang scribble/lp2}, a literate-programming language in which code sits in named \code{@chunk} blocks inside the prose. ``Scribble HTML/PDF'' renders the document; ``Run'' runs every chunk listed in the top-level \code{<*>} chunk. Tests are written with \code{check-expect} from \code{test-engine/racket-tests}, and the final \rkt|(test)| reports the results.
+This section practices the basics of the chapter in DrRacket, on a running example about traffic lights. The code is written as a literate program: it is written in \code{\#lang scribble/lp2}, a literate-programming language in which code sits in named \code{@chunk} blocks inside the prose. ``Scribble HTML/PDF'' renders the document; ``Run'' runs every chunk listed in the top-level \code{<*>} chunk. Tests are written with \code{check-expect} from \code{test-engine/racket-tests}, and the final \rkt|(test)| reports the results.
 
 \subsection{Expressions and Functions}
 
@@ -50,7 +50,7 @@ Red is safe because the next light is green; yellow is not, because the next lig
 
 \subsection{Specifications}
 
-Before writing a function, state which inputs are valid and what output to expect. The handout's format is a list of EXPECTS and PRODUCES lines plus one sentence of meaning. For \code{next-light-iter}:
+Before writing a function, state which inputs are valid and what output to expect. The format is a list of EXPECTS and PRODUCES lines plus one sentence of meaning. For \code{next-light-iter}:
 \begin{itemize}
   \item EXPECTS a non-negative integer \code{n} and a traffic light \code{l};
   \item PRODUCES a traffic light: the color of \code{l} after it changes \code{n} times.
@@ -122,7 +122,7 @@ Two traces show both outcomes. A Prius covers $23 \times 27 = 621$\,m during a g
 The recursion terminates because every recursive call has a strictly smaller \code{d}: each light lasts a positive time and every vehicle has positive speed.
 
 \begin{remark}
-The handout's prose writes the call as \code{(safe-to-scroll v l d)}, while the posted code takes \code{(v d l)}. The code and its test are consistent, so the order is \code{(v d l)}. This is the kind of mismatch a specification is meant to catch.
+The problem statement writes the call as \code{(safe-to-scroll v l d)}, while the code takes \code{(v d l)}. The code and its test are consistent, so the order is \code{(v d l)}. This is the kind of mismatch a specification is meant to catch.
 \end{remark}
 
 \subsection{Lists and Higher-Order Programming}
@@ -148,7 +148,7 @@ expression & result \\
 Write \code{all-even-rec}: it EXPECTS a list of integers and PRODUCES \code{\#t} when every number in it is even.
 \end{exercise}
 \begin{solution}
-The TA solution uses \code{match} with a \code{cons} pattern, which tests for a non-empty list and names its two parts in one step:
+The solution uses \code{match} with a \code{cons} pattern, which tests for a non-empty list and names its two parts in one step:
 \begin{lstlisting}
 (define (all-even-rec l)
   (match l
@@ -168,7 +168,7 @@ Given \code{all}, which checks that a list of booleans is all \code{\#t}, write 
 \end{lstlisting}
 \end{exercise}
 \begin{solution}
-The intended answer is \rkt|(all (map is-even l))|: \code{map} turns the numbers into booleans and \code{all} combines them. The TA solution skips the intermediate list and passes \code{is-even} to \code{andmap} directly:
+The intended answer is \rkt|(all (map is-even l))|: \code{map} turns the numbers into booleans and \code{all} combines them. The solution skips the intermediate list and passes \code{is-even} to \code{andmap} directly:
 \begin{lstlisting}
 (define (all-even-map l) (andmap is-even l))
 \end{lstlisting}

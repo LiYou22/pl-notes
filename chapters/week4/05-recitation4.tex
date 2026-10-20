@@ -1,26 +1,26 @@
 \section{Recitation 4: Pattern Matching in the Interpreter}
 \label{sec:rec4}
 
-In \Cref{sec:rec3} we \emph{used} Racket's \code{match} to write \code{factorial} and \code{fibonacci}. This recitation \emph{implements} a small version of it: the calculator with \code{let} gets a \code{match} form, and each part of the interpreter is extended in turn: the types, \code{parse}, \code{subst}, and \code{eval}. The file starts with the \code{gensym} import of \Cref{sec:capavoid}, since its \code{let} uses capture-avoiding lazy substitution.
+In \Cref{sec:rec3}, we \emph{used} Racket's \code{match} to write \code{factorial} and \code{fibonacci}. This section \emph{implements} a small version of it. We add a \code{match} form to the calculator with \code{let}, and extend each part of the interpreter in turn: the types, \code{parse}, \code{subst}, and \code{eval}. The code starts with the \code{gensym} import of \Cref{sec:capavoid}, because its \code{let} uses capture-avoiding lazy substitution.
 
 \subsection{The New Form}
 
-A pattern-matching expression looks like
+A pattern-matching expression looks like this:
 \begin{lstlisting}[style=repl]
 (match e (n1 e1) (n2 e2) ... (_ en))
 \end{lstlisting}
-where each \code{ni} is a number literal and \code{\_} is the wildcard. To evaluate it:
+Each \code{ni} is a number literal, and \code{\_} is the wildcard. To evaluate the expression:
 \begin{enumerate}
   \item evaluate \code{e} to a number, once;
-  \item try the clauses top to bottom: \code{ni} matches if it equals that number, and \code{\_} matches anything;
+  \item try the clauses from top to bottom: \code{ni} matches if it equals that number, and \code{\_} matches anything;
   \item the \emph{first} matching clause wins, and only its expression is evaluated;
   \item if no clause matches, it is an error.
 \end{enumerate}
-This is Racket's \code{match} restricted to literals and \code{\_}, just enough for \code{factorial}- and \code{fibonacci}-style definitions. There are no pattern variables, so a clause never binds a name; that matters for substitution.
+This is Racket's \code{match}, restricted to literals and \code{\_}. That is just enough for definitions in the style of \code{factorial} and \code{fibonacci}. There are no pattern variables, so a clause never binds a name. This fact will matter for substitution.
 
 \subsection{Types}
 
-A clause pairs a pattern with an expression. The two kinds of clause carry different data (a number pattern has a number, the wildcard nothing), so each gets its own variant:
+A clause pairs a pattern with an expression. The two kinds of clause carry different data: a number pattern has a number, and the wildcard has nothing. So each kind gets its own variant:
 \begin{lstlisting}
 (define-type PatternE
   [numP (n : number) (e : ArithE)]
@@ -34,9 +34,11 @@ A clause pairs a pattern with an expression. The two kinds of clause carry diffe
   [idC (x : symbol)]
   [patternC (e : ArithE) (patterns : (listof PatternE))])
 \end{lstlisting}
-\code{patternC} holds the expression being matched, the \emph{scrutinee}, and the clauses in order. The two types are \emph{mutually recursive}: an \tyname{ArithE} can contain \tyname{PatternE}s, and each \tyname{PatternE} contains an \tyname{ArithE}. \code{define-type} allows that, in either order.
+\code{patternC} holds two things: the expression being matched, called the \emph{scrutinee}, and the clauses in order.
 
-\subsubsection{Examples} The handout's four examples, in ML-like notation:
+The two types are \emph{mutually recursive}. An \tyname{ArithE} can contain \tyname{PatternE}s, and each \tyname{PatternE} contains an \tyname{ArithE}. \code{define-type} allows this, and the two definitions can come in either order.
+
+\subsubsection{Examples} Here are four examples, in ML-like notation:
 \begin{center}
 \begin{tabular}{@{}lll@{}}
 \toprule
@@ -64,11 +66,11 @@ A clause pairs a pattern with an expression. The two kinds of clause carry diffe
                                               (list (numP 0 (idC 'x))
                                                     (numP 1 (plusC (numC 1) (idC 'y)))))))))))
 \end{lstlisting}
-Examples 2 and 4 both contain a name that nothing binds (\code{x} and \code{z}), yet neither is an error, because that clause is never chosen. In example~3 the error comes from the scrutinee \code{x}, which is always evaluated.
+Examples 2 and 4 both contain a name that nothing binds: \code{x} in example~2 and \code{z} in example~4. Yet neither program is an error, because the clause containing that name is never chosen. Example~3 is different. Its error comes from the scrutinee \code{x}, and the scrutinee is always evaluated.
 
 \subsection{Parsing}
 
-The concrete syntax is \code{(match e clause ...)}, so after the \code{match} keyword, \rkt|(second l)| is the scrutinee and \rkt|(rest (rest l))| is the list of clauses. A helper turns that list of s-expressions into a list of \tyname{PatternE}s. Each clause is a two-element list \code{(pattern expr)}, and the pattern decides which variant to build:
+The concrete syntax is \code{(match e clause ...)}. So after the \code{match} keyword, \rkt|(second l)| is the scrutinee, and \rkt|(rest (rest l))| is the list of clauses. A helper turns that list of s-expressions into a list of \tyname{PatternE}s. Each clause is a two-element list \code{(pattern expr)}, and the pattern decides which variant to build:
 \begin{lstlisting}
 (define (parse-patterns (s-pats : (listof s-expression))) : (listof PatternE)
   (cond
@@ -94,11 +96,11 @@ The concrete syntax is \code{(match e clause ...)}, so after the \code{match} ke
          [(let) (letC (s-exp->symbol (second l)) (parse (third l)) (parse (fourth l)))]
          [(match) (patternC (parse (second l)) (parse-patterns (rest (rest l))))]))]))
 \end{lstlisting}
-Three details of the TA solution:
+Three details of this parser are worth noting:
 \begin{itemize}
-  \item A number clause is \code{cons}ed onto the rest, but a \code{\_} clause returns \rkt|(list (anyP ...))|: parsing \emph{stops} at the first wildcard. Any clause after it could never be reached, so dropping it does not change what the program means: \rkt|(parse '(match 1 (_ 0) (2 3)))| has one clause.
-  \item The pattern is \emph{not} parsed as an expression; it must be a number literal or \code{\_}. Anything else is an error, though not one this function raises itself: \code{(match 3 ((+ 1 2) 0))} fails in \code{s-exp->symbol} (\code{not a symbol}), and \code{(match 3 (n 0))} falls off the end of the inner \code{cond} (\code{no matching clause}).
-  \item \code{parse-patterns} and \code{parse} call each other, just as the two types refer to each other. \code{match} is a symbol in \emph{our} language, matched by \code{case} like \code{+} and \code{let}.
+  \item Parsing \emph{stops} at the first wildcard. A number clause is \code{cons}ed onto the rest of the clauses, but a \code{\_} clause returns just \rkt|(list (anyP ...))|. Any clause after a wildcard could never be reached, so dropping it does not change the meaning of the program. For example, \rkt|(parse '(match 1 (_ 0) (2 3)))| has only one clause.
+  \item The pattern is \emph{not} parsed as an expression. It must be a number literal or \code{\_}, and anything else is an error. This function does not raise that error itself, though. Instead, \code{(match 3 ((+ 1 2) 0))} fails inside \code{s-exp->symbol} (\code{not a symbol}), and \code{(match 3 (n 0))} falls off the end of the inner \code{cond} (\code{no matching clause}).
+  \item \code{parse-patterns} and \code{parse} call each other, just as the two types refer to each other. Note that \code{match} is a symbol in \emph{our} language, and \code{case} matches it the same way it matches \code{+} and \code{let}.
 \end{itemize}
 
 \subsection{Substitution}
@@ -107,10 +109,10 @@ Three details of the TA solution:
 Why do we need to define substitution for pattern-matching expressions?
 \end{exercise}
 \begin{solution}
-Because \code{let} is implemented by substitution, and the body of a \code{let} can contain a \code{match}. In example~4, the \code{x} and \code{y} bound by the \code{let}s are used in the scrutinees and in the clause bodies. If \code{subst} stopped at a \code{patternC}, those \code{idC}s would never be replaced and \code{eval} would report them as unbound. (In \code{plai-typed} the question does not really arise: \code{type-case} rejects a \code{subst} that has no \code{patternC} case.)
+Because \code{let} is implemented by substitution, and the body of a \code{let} can contain a \code{match}. In example~4, the \code{x} and \code{y} bound by the \code{let}s are used both in the scrutinees and in the clause bodies. If \code{subst} stopped at a \code{patternC}, those \code{idC}s would never be replaced, and \code{eval} would report them as unbound. (In \code{plai-typed} the question does not really arise: \code{type-case} rejects a \code{subst} that has no \code{patternC} case.)
 \end{solution}
 
-Substituting into a clause means substituting into its expression; the pattern itself is a number or \code{\_}, with no names in it:
+Substituting into a clause means substituting into its expression. The pattern itself is a number or \code{\_}, so it contains no names:
 \begin{lstlisting}
 (define (subst-pattern (erep : ArithE) (x : symbol)) : (PatternE -> PatternE)
   (lambda (p)
@@ -118,7 +120,7 @@ Substituting into a clause means substituting into its expression; the pattern i
       [numP (n e) (numP n (subst erep x e))]
       [anyP (e) (anyP (subst erep x e))])))
 \end{lstlisting}
-\code{subst-pattern} is \emph{curried}: it takes \code{erep} and \code{x} and returns a function from one clause to one clause. That is exactly the shape \code{map} wants, so the \code{patternC} case is one line:
+\code{subst-pattern} is \emph{curried}. It takes \code{erep} and \code{x}, and returns a function from one clause to one clause. That is exactly the shape \code{map} wants, so the \code{patternC} case fits on one line:
 \begin{lstlisting}
 (define (subst (erep : ArithE) (x : symbol) (e : ArithE)) : ArithE
   (type-case ArithE e
@@ -134,11 +136,13 @@ Substituting into a clause means substituting into its expression; the pattern i
              (let [(z (gensym))]
                (letC z (subst erep x e1) (subst erep x (subst (idC z) y e2))))])]))
 \end{lstlisting}
-The \code{letC} case is lecture~4's capture-avoiding \code{subst-lazy-v2}. Note what the \code{patternC} case does \emph{not} need: no shadowing check and no renaming. Those exist for \code{letC} because a \code{let} binds a name; our patterns bind nothing, so a clause body sees exactly the same names as the \code{match} around it, like the children of \code{plusC}.
+The \code{letC} case is the capture-avoiding \code{subst-lazy-v2} of \Cref{sec:capavoid}.
+
+Note what the \code{patternC} case does \emph{not} need: a shadowing check or renaming. \code{letC} needs those because a \code{let} binds a name. Our patterns bind nothing, so a clause body sees exactly the same names as the \code{match} around it. In this respect, clauses behave like the children of \code{plusC}.
 
 \subsection{Evaluation}
 
-The helper \code{get-pat-expr} takes the number the scrutinee evaluated to and the clauses, and returns the \emph{expression} of the first clause that matches:
+The helper \code{get-pat-expr} takes two arguments: the number the scrutinee evaluated to, and the clauses. It returns the \emph{expression} of the first clause that matches:
 \begin{lstlisting}
 (define (get-pat-expr (num : number) (pats : (listof PatternE))) : ArithE
   (cond
@@ -156,11 +160,11 @@ The helper \code{get-pat-expr} takes the number the scrutinee evaluated to and t
     [letC (x e1 e2) (eval (subst e1 x e2))]
     [idC (x) (error 'eval "unbound variable!")]))
 \end{lstlisting}
-\code{eval} evaluates the scrutinee once, picks the clause, and evaluates only that clause's expression.
+\code{eval} evaluates the scrutinee once, picks the clause, and then evaluates only that clause's expression.
 
-\subsubsection{Why return the expression, not its value?} \code{get-pat-expr} could evaluate every clause and return numbers. That would be wrong, not just slow: example~4 has a clause \code{(0 z)}, and evaluating it would raise ``unbound variable'' even though the scrutinee is 1 and the clause is never chosen. Returning the unevaluated \tyname{ArithE} means only the chosen clause is evaluated, just as only one branch of an \code{if} is.
+\subsubsection{Why return the expression, not its value?} \code{get-pat-expr} could instead evaluate every clause and return numbers. That would be wrong, not just slow. Example~4 has a clause \code{(0 z)}, and evaluating it would raise ``unbound variable'', even though the scrutinee is 1 and that clause is never chosen. Returning the unevaluated \tyname{ArithE} means that only the chosen clause is evaluated. This is the same reason only one branch of an \code{if} is evaluated.
 
-\subsubsection{Tracing example 4} \code{g1} stands for whatever name \code{gensym} returns.
+\subsubsection{Tracing example 4} In the trace, \code{g1} stands for whatever name \code{gensym} returns.
 \begin{lstlisting}[style=repl]
 (let x 1 (let y 1 (match x (0 z) (_ (match y (0 x) (1 (+ 1 y)))))))
 letC x:  subst (numC 1) for x in the body.
@@ -174,9 +178,11 @@ patternC: scrutinee = 1; (0 1) fails; (1 ...) matches
 ---> (+ 1 1)
 ---> 2
 \end{lstlisting}
-The clause \code{(0 z)} is skipped without being evaluated, which is why the free \code{z} is harmless. Example~3 fails at its first step: the scrutinee is \rkt|(idC 'x)|, no \code{let} has replaced it, and \code{eval} reports it as unbound.
+The clause \code{(0 z)} is skipped without being evaluated. This is why the free \code{z} is harmless.
 
-\subsubsection{Clause order} Because \code{get-pat-expr} walks the list from the front and stops at the first match, order matters, and a clause after \code{\_} is dead code:
+Example~3, in contrast, fails at its very first step. Its scrutinee is \rkt|(idC 'x)|, no \code{let} has replaced it, and so \code{eval} reports it as unbound.
+
+\subsubsection{Clause order} \code{get-pat-expr} walks the list from the front and stops at the first match. So the order of clauses matters, and a clause after \code{\_} is dead code:
 \begin{lstlisting}
 (test (eval (parse '(match 5 (_ 0) (5 1)))) 0)
 (test (eval (parse '(match 5 (5 1) (_ 0)))) 1)
@@ -184,4 +190,4 @@ The clause \code{(0 z)} is skipped without being evaluated, which is why the fre
 (test (eval (parse '(match (* 2 3) (5 0) (6 1) (_ 2)))) 1)
 (test/exn (eval (parse '(match 7 (5 0) (6 1)))) "unmatched expression")
 \end{lstlisting}
-The last test is the run-time ``no matching clause'' error of \Cref{sec:rec3}, now in our own language. Nothing can check for it ahead of time: whether a clause matches depends on a number known only when the program runs.
+The last test is the run-time ``no matching clause'' error of \Cref{sec:rec3}, now in our own language. Nothing can check for this error ahead of time, because whether a clause matches depends on a number that is known only when the program runs.

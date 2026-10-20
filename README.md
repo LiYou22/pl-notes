@@ -49,7 +49,7 @@ chapters/
     02-store-passing.tex          locations, the store, threading it through eval
     03-store-boxes.tex            the box clauses, traces of ex4 and ex5, env vs. store
     04-meta-circular.tex          boxes and functions implemented with Racket's; what each version explains
-    05-recitation6.tex            Recitation 6 (placeholder)
+    05-recitation6.tex            Recitation 6: set!, evaluation order, immutable tables, mret/mbind
 ```
 
 ## Building

@@ -3,7 +3,7 @@
 
 \subsection{The Starting Point}
 
-The lecture opened where week~4 ended: the eager interpreter with functions, \code{eval-eager-v3} of \Cref{sec:eagerapp}. A call evaluates the function and the argument, then substitutes the argument's value into the body with the capture-avoiding \code{subst-lazy-v2} of \Cref{sec:capavoid}; function values are written \code{(lambdaV x e)} in lecture, \code{funV} in week~4. On the board the two binding forms were
+We start where \Cref{ch:week4} ended: the eager interpreter with functions, \code{eval-eager-v3} of \Cref{sec:eagerapp}. A call evaluates the function and the argument, then substitutes the argument's value into the body with the capture-avoiding \code{subst-lazy-v2} of \Cref{sec:capavoid}; function values are written \code{(lambdaV x e)} here, \code{funV} in \Cref{sec:lambda}. The two binding forms are
 \begin{lstlisting}
     [letC (y e1 e2)
           (eval (subst e1 y e2))]
@@ -12,10 +12,10 @@ The lecture opened where week~4 ended: the eager interpreter with functions, \co
                 [v2 (eval e2)])
             (eval (subst (val->expr v2) (lambdaV-x v1) (lambdaV-e v1))))]
 \end{lstlisting}
-where \code{val->expr} turns a value back into an expression, as \code{value->expr} did in week~4.
+where \code{val->expr} turns a value back into an expression, as \code{value->expr} did in \Cref{sec:lambda}.
 
 \begin{remark}
-The \code{letC} line above is a \emph{lazy} \code{let} next to an \emph{eager} application. The substitution interpreter kept for comparison in \code{lecture5a.rkt} (\Cref{sec:envcheck}) evaluates \code{e1} first, and the rest of this chapter takes \code{let} to be eager whenever application is. Mixing the two strategies would break the equation of the next subsection.
+The \code{letC} line above is a \emph{lazy} \code{let} next to an \emph{eager} application. The substitution interpreter kept for comparison in \Cref{sec:envcheck} evaluates \code{e1} first, and the rest of this chapter takes \code{let} to be eager whenever application is. Mixing the two strategies would break the equation of the next subsection.
 \end{remark}
 
 \subsection{\texttt{let} Is Function Application}
@@ -35,9 +35,88 @@ Both sides evaluate \code{e1}, substitute it for \code{x} in \code{e2}, and eval
 \end{lstlisting}
 So \code{letC} is not needed in the core language: \code{parse} could turn every \code{let} into an \code{appC} of a \code{lambdaC}, and \code{eval} and \code{subst} would lose a case each. This is \emph{desugaring}. The equation holds only if \code{let} and application use the same strategy, both eager or both lazy. With a lazy \code{let} and an eager call, \code{(let x (+ y y) 10)} is 10 but \code{((lambda x 10) (+ y y))} is an unbound-variable error.
 
+\subsubsection{Step by step} Under eager evaluation, the two sides do the same work in the same order:
+\begin{lstlisting}[style=repl]
+(let x e1 e2)                     ((lambda x e2) e1)
+1. evaluate e1 to a value v       1. evaluate (lambda x e2): a function value
+                                  2. evaluate e1 to a value v
+2. bind x to v, evaluate e2       3. bind x to v, evaluate the body e2
+\end{lstlisting}
+Step 1 on the right does no real work. Evaluating a \code{lambda} only packages the parameter and the body into a value. After that, both sides compute \code{e1} and then compute \code{e2} with \code{x} standing for its value.
+
+The scopes match as well. On both sides, \code{x} is visible in \code{e2} and nowhere else. A \code{let} is defined that way, and in the application \code{e1} lies outside the \code{lambda}, so it cannot see the parameter. So every use of a name points to the same binder on both sides, and the two programs have the same binding arrows.
+
+\subsubsection{Where the binding happens} A \code{lambda} only \emph{declares} its parameter. The binding happens when the function is \emph{called}, because only then is the argument's value known. In the interpreter, that is the last line of the \code{appC} case. In the substitution interpreter above, binding \code{x} to \code{v} means substituting \code{v} for \code{x} in the body:
+\begin{lstlisting}
+(eval (subst (val->expr v2) (lambdaV-x v1) (lambdaV-e v1)))
+;      bind: replace the parameter by the argument's value in the body
+\end{lstlisting}
+In the environment interpreter of \Cref{sec:closures}, binding means extending the environment instead:
+\begin{lstlisting}
+(eval-env (extend-env (bind (closV-x v1) v2) (closV-env v1))
+          (closV-e v1))
+;          bind: add parameter = argument's value to the saved environment
+\end{lstlisting}
+The two forms differ only in where the name and the value come from:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+& \code{let} & \code{lambda} application \\
+\midrule
+binding happens in & the \code{letC} case & the \code{appC} case \\
+the name comes from & the \code{letC} field & the parameter, kept in the function value \\
+the value comes from & evaluating \code{e1} & evaluating the argument \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{Several bindings: \code{let} and \code{let*}} The same idea extends to forms that bind several names at once, such as the \code{let} and \code{let*} of Problem Set~2 (written with brackets, as in Racket). Here the difference between the two forms becomes visible.
+
+A multi-binding \code{let} is a call to a function with several parameters:
+\begin{lstlisting}
+(let ([x1 e1] ... [xn en]) body)   means   ((lambda (x1 ... xn) body) e1 ... en)
+\end{lstlisting}
+All the arguments \code{e1} \dots\ \code{en} sit outside the \code{lambda}, so none of them can see any \code{xi}. Each \code{ei} is evaluated in the outer scope, which is exactly the rule for \code{let}.
+
+A \code{let*} is a chain of one-binding \code{let}s, one inside the next, and so a chain of one-parameter \code{lambda}s:
+\begin{lstlisting}
+(let* ([x1 e1] [x2 e2]) body)
+  means   (let ([x1 e1]) (let ([x2 e2]) body))
+  means   ((lambda (x1) ((lambda (x2) body) e2)) e1)
+\end{lstlisting}
+Now \code{e2} sits \emph{inside} the \code{lambda} for \code{x1}, so it can see \code{x1}. That is exactly the rule for \code{let*}: each \code{ei} sees the bindings before it.
+
+\begin{example}
+The two programs below differ only in \code{let} versus \code{let*}:
+\begin{lstlisting}
+(let ([x 5]) (let  ([x (* x 2)] [y x]) (+ x y)))    ; 15
+(let ([x 5]) (let* ([x (* x 2)] [y x]) (+ x y)))    ; 20
+\end{lstlisting}
+Desugar the inner forms:
+\begin{lstlisting}
+;; let: both arguments are evaluated outside the lambda, where x = 5
+((lambda (x y) (+ x y)) (* x 2) x)
+---> ((lambda (x y) (+ x y)) 10 5)
+---> (+ 10 5) = 15
+
+;; let*: the second binding sits inside the first lambda, where x = 10
+((lambda (x) ((lambda (y) (+ x y)) x)) (* x 2))
+---> ((lambda (x) ((lambda (y) (+ x y)) x)) 10)
+---> ((lambda (y) (+ 10 y)) 10)
+---> (+ 10 10) = 20
+\end{lstlisting}
+In the \code{let} version, the argument \code{x} that becomes \code{y} is outside the \code{lambda}, so it is the outer \code{x}, which is 5. In the \code{let*} version, it is inside the \code{lambda} for the new \code{x}, so it is 10.
+\end{example}
+
+\begin{pitfall}[Nesting one-parameter \code{lambda}s gives \code{let*}, not \code{let}]
+It is tempting to desugar a multi-binding \code{let} into nested one-parameter \code{lambda}s. That changes its meaning: every later argument moves inside an earlier \code{lambda} and can now see the earlier names. A \code{let} needs a single call with all the arguments outside, or some other way to evaluate every \code{ei} in the outer scope.
+\end{pitfall}
+
+In an interpreter, the two rules show up as the environment each \code{ei} is evaluated in. For \code{let}, every \code{ei} is evaluated in the environment of the \code{let} itself, and the new bindings are added all at once before the body. For \code{let*}, the environment is extended after each binding, and the next \code{ei} is evaluated in the extended one.
+
 \subsection{Capture, Once More}
 
-The lecture's capture example, written on the board:
+A capture example:
 \begin{lstlisting}
 (let x (+ 1 y) (let y 2 (+ x y)))
 \end{lstlisting}
@@ -53,7 +132,7 @@ with renaming (subst-lazy-v2):
 ---> (+ (+ 1 y) 2)
 ---> unbound variable             right
 \end{lstlisting}
-The second trace is the line \code{(let z 2 (+ (+ 1 y) z))} from the board. It is the week~4 example \code{(let x y (let y 2 (+ x y)))} with \code{y} replaced by \code{(+ 1 y)}: any substituted expression that has a free variable can be captured, however complicated it is. An eager \code{let} reports the error even earlier, while evaluating \code{(+ 1 y)} before any substitution.
+The second trace ends in \code{(let z 2 (+ (+ 1 y) z))}. It is the example of \Cref{sec:lazy} \code{(let x y (let y 2 (+ x y)))} with \code{y} replaced by \code{(+ 1 y)}: any substituted expression that has a free variable can be captured, however complicated it is. An eager \code{let} reports the error even earlier, while evaluating \code{(+ 1 y)} before any substitution.
 
 \begin{figure}[htbp]
 \centering
@@ -69,7 +148,7 @@ The second trace is the line \code{(let z 2 (+ (+ 1 y) z))} from the board. It i
   \node[lbl, above=1mm of fy, text=sigc] {free: bound by nothing};
   \node[lbl, below=15mm of fy, text=accent] {each use points to the nearest enclosing binder};
 \end{tikzpicture}
-\caption{Lexical binding structure of the board example. The \code{y} inside \code{(+ 1 y)} is free; a correct substitution must keep it free after moving it under \code{(let y 2 ...)}.}
+\caption{Lexical binding structure of the capture example. The \code{y} inside \code{(+ 1 y)} is free; a correct substitution must keep it free after moving it under \code{(let y 2 ...)}.}
 \label{fig:capture5}
 \end{figure}
 
@@ -95,6 +174,12 @@ which is the \code{appC} case of the lazy interpreter: substitute the argument f
 
 \subsection{$\alpha$-Equivalence}
 
+\begin{definition}[Free and bound variables]
+\label{def:freevars}
+A use of a name is \emph{bound} if some enclosing binder (a \code{let}, a \code{lambda}, or any other form that introduces names) binds that name; it refers to the nearest such binder. A use with no enclosing binder of its name is \emph{free}. $\mathrm{FV}(e)$ is the set of names that occur free in $e$.
+\end{definition}
+For example, in \code{(let y 2 (+ x y))} the \code{y} in the body is bound and the \code{x} is free, so $\mathrm{FV} = \{\code{x}\}$.
+
 \begin{definition}[$\alpha$-equivalence]
 Two expressions are \emph{$\alpha$-equivalent} if they differ only in the names of bound variables, renamed consistently together with their uses. Free variables must stay as they are.
 \end{definition}
@@ -110,8 +195,88 @@ Two expressions are \emph{$\alpha$-equivalent} if they differ only in the names 
 \end{tabular}
 \end{center}
 
+To decide whether two expressions are $\alpha$-equivalent, draw for each variable use an arrow to the binder it refers to, and mark the uses that have no binder as free. The two expressions are $\alpha$-equivalent exactly when the free variables have the same names in the same places and every arrow points to the binder in the corresponding place. A rename is safe when the new name is \emph{fresh}: it does not occur free in the binder's scope, so no use that pointed outward gets captured by the renamed binder.
+
+\begin{exercise}[Checking renamings]
+Which of the following are $\alpha$-equivalent to \code{(* a ((lambda (b) (+ a b)) 3))}?
+\begin{enumerate}[label=(\Alph*)]
+  \item \code{(* a ((lambda (c) (+ a c)) 3))}
+  \item \code{(* c ((lambda (b) (+ c b)) 3))}
+  \item \code{(* a ((lambda (a) (+ a a)) 3))}
+\end{enumerate}
+\end{exercise}
+\begin{solution}
+In the original, \code{a} is free (both uses) and \code{b} is bound by the \code{lambda}.
+\begin{enumerate}[label=(\Alph*)]
+  \item $\alpha$-equivalent. The bound \code{b} is renamed to \code{c} at the binder and at its use; \code{c} is fresh, and the free \code{a} is untouched.
+  \item \emph{Not}. Both uses of the free \code{a} became \code{c}. Renaming a free variable changes which outside value the expression depends on.
+  \item \emph{Not}. Renaming \code{b} to \code{a} is not fresh: \code{a} occurs free in the body \code{(+ a b)}. After the rename, that \code{a} is captured by \code{(lambda (a) ...)}, so the function returns twice its argument instead of adding the outer \code{a}.
+\end{enumerate}
+\end{solution}
+
+\subsubsection{Free variables of $\alpha$-equivalent expressions} Renaming touches only bound variables, so it should leave the free ones alone. The following makes this precise.
+
+\begin{theorem}
+If $e_1$ and $e_2$ are $\alpha$-equivalent, then $\mathrm{FV}(e_1) = \mathrm{FV}(e_2)$. Moreover, the free uses sit in the same places: wherever $e_1$ has a free \code{x}, $e_2$ has a free \code{x} at the corresponding place in the tree.
+\end{theorem}
+\begin{proof}[Proof sketch]
+It suffices to show that one legal rename keeps the free variables, since $\alpha$-equivalence is built from a finite number of renames. A rename changes only a binder and the uses that point to it, so no free name is changed. The new name is fresh, so no free use is captured by the renamed binder. And the renamed uses still point to the same binder, so no bound use becomes free. Each use therefore stays free or stays bound, and free names keep their spelling.
+\end{proof}
+
+The theorem gives a quick way to rule out $\alpha$-equivalence: if the free variables differ, the two expressions cannot be $\alpha$-equivalent.
+\begin{center}
+\begin{tabular}{@{}llll@{}}
+\toprule
+$e_1$ & $e_2$ & FV & $\alpha$-equivalent? \\
+\midrule
+\code{(lambda (x) (+ x y))} & \code{(lambda (z) (+ z y))} & $\{\code{y}\}$, $\{\code{y}\}$ & yes \\
+\code{(lambda (x) (+ x y))} & \code{(lambda (y) (+ y y))} & $\{\code{y}\}$, $\{\}$ & no (\code{y} captured) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The converse is false: equal free variables do not make two expressions $\alpha$-equivalent. \code{(+ y 1)} and \code{(* y 2)} both have $\mathrm{FV} = \{\code{y}\}$, but their trees differ. So comparing free variables is a necessary check, not a sufficient one. When the sets agree, compare the binding arrows, or the lexical addresses of \Cref{sec:lexaddr}.
+
+\subsubsection{Subexpressions} If two expressions are $\alpha$-equivalent, are their corresponding subexpressions $\alpha$-equivalent too? Not always. A subexpression taken out on its own loses its enclosing binders, so the names those binders bound become free, and the renamed ones no longer match:
+\begin{lstlisting}
+(lambda (x) x)   and   (lambda (y) y)     alpha-equivalent
+x                and   y                  the bodies: not alpha-equivalent
+\end{lstlisting}
+Corresponding subexpressions are $\alpha$-equivalent when no renamed binder encloses them, for example when they are closed. Bodies under renamed binders are compared by first giving both parameters the same fresh name \code{z}:
+\[
+\code{(lambda (x) b1)} \equiv_\alpha \code{(lambda (y) b2)}
+\quad\text{exactly when}\quad
+b_1[\code{x} := \code{z}] \equiv_\alpha b_2[\code{y} := \code{z}].
+\]
+
+\subsubsection{Substitution and $\alpha$-equivalence} In this subsection, $e[x := e']$ is capture-avoiding substitution. Substitution preserves $\alpha$-equivalence: start from $\alpha$-equivalent pieces, substitute, and the results are still $\alpha$-equivalent. Going backwards, from equal results to the pieces, works only when the substitution loses no information. \Cref{tab:substalpha} collects the four directions.
+
+\begin{table}[htbp]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+if & then & holds? \\
+\midrule
+$e_1 \equiv_\alpha e_2$ & $C[x := e_1] \equiv_\alpha C[x := e_2]$ & always \\
+$e_1 \equiv_\alpha e_2$ & $e_1[x := v] \equiv_\alpha e_2[x := v]$ & always \\
+$C[x := e_1] \equiv_\alpha C[x := e_2]$ & $e_1 \equiv_\alpha e_2$ & only if $x$ occurs free in $C$ \\
+$e_1[x := v] \equiv_\alpha e_2[x := v]$ & $e_1 \equiv_\alpha e_2$ & not in general; yes if $v$ is a fresh variable \\
+\bottomrule
+\end{tabular}
+\caption{Capture-avoiding substitution and $\alpha$-equivalence. The first two rows fail for capturing substitution.}
+\label{tab:substalpha}
+\end{table}
+
+\paragraph{Same context, different pieces (row 3).} If $x$ does not occur free in $C$, substitution does nothing, and nothing follows: with $C = \code{(+ 1 2)}$, both $C[x := 5]$ and $C[x := 7]$ are \code{(+ 1 2)}, yet 5 and 7 are not $\alpha$-equivalent. If $x$ does occur free in $C$, look at one of its places. After substitution, that place holds a copy of $e_1$ on one side and of $e_2$ on the other. Because the substitution avoids capture, no binder of $C$ can catch a free name of $e_1$ or $e_2$. So every arrow starting inside $e_1$ ends inside $e_1$ or leaves the whole expression, and likewise for $e_2$. The two whole expressions have the same arrows, so the two copies do too, which makes $e_1 \equiv_\alpha e_2$.
+
+\paragraph{Different expressions, same piece (row 4).} Substitution can forget where something came from: with $e_1 = \code{x}$, $e_2 = \code{5}$, and $v = \code{5}$, both results are \code{5}, but \code{x} and \code{5} are not $\alpha$-equivalent. The exception is a rename to a fresh variable \code{z}. Since \code{z} occurs nowhere else, every \code{z} in the result must have been an \code{x}, so the rename can be undone and nothing is lost. This is the case used above to compare the bodies of two \code{lambda}s.
+
+\begin{remark}
+The arguments for rows 3 and 4 are sketches, not full proofs. A complete proof goes by induction on the structure of the expression; compare \cite[Section~5.3]{TAPL}, where terms are identified up to $\alpha$-equivalence.
+\end{remark}
+
 \begin{keypoint}[Why $\alpha$-equivalence matters for the interpreter]
-$\alpha$-equivalent programs must give the same answer: the names of bound variables are the programmer's choice and carry no meaning. This principle does two jobs in week~4:
+$\alpha$-equivalent programs must give the same answer: the names of bound variables are the programmer's choice and carry no meaning. This principle does two jobs in \Cref{ch:week4}:
 \begin{itemize}
   \item It \emph{detects} the capture bug. \code{(let x y (let y 2 (+ x y)))} and \code{(let x y (let z 2 (+ x z)))} are $\alpha$-equivalent, yet capturing substitution gives 4 for one and an error for the other.
   \item It \emph{licenses} the fix. Renaming a bound \code{y} to a fresh \code{gensym} produces an $\alpha$-equivalent program, so \code{subst} may rename whenever it likes.
@@ -119,3 +284,60 @@ $\alpha$-equivalent programs must give the same answer: the names of bound varia
 \end{keypoint}
 
 The same test will expose the bug in \Cref{sec:dynscope}: renaming the inner \code{x} to \code{z} in \code{(let x 1 (let y x (let x 2 (+ y y))))} changes the answer of the first lazy environment interpreter, so that interpreter is wrong.
+
+\subsection{Lexical Addresses}
+\label{sec:lexaddr}
+
+$\alpha$-equivalence says that only the arrows from uses to binders matter, not the names. A \emph{lexical address} writes each arrow down as a pair of numbers, so the names can be dropped altogether.
+
+\begin{definition}[Lexical depth and lexical position]
+Let a variable use refer to a binder. Its \emph{lexical depth} $d$ is the number of binders that lie between the use and its binder: $0$ if the binder is the innermost one enclosing the use, $1$ if one more binder must be crossed, and so on. Its \emph{lexical position} $p$ is the index of the variable in that binder's parameter list, counting from $0$. The pair is written \code{(: d p)}.
+\end{definition}
+
+In the nameless form, each \code{(lambda (x1 ... xn) body)} becomes \code{(lambda n body)}, keeping only the number of parameters, and each bound use becomes its address. A free variable has no binder and therefore no address; it keeps its name.
+
+\begin{example}
+\begin{lstlisting}
+(lambda (x y)
+  ((lambda (a) (x (a y)))
+   x))
+\end{lstlisting}
+Inside the inner \code{lambda}, \code{a} is bound by the innermost binder, at position 0, so it is \code{(: 0 0)}. \code{x} and \code{y} are bound one binder further out, at positions 0 and 1: \code{(: 1 0)} and \code{(: 1 1)}. The last \code{x} sits directly in the outer \code{lambda}, so it is \code{(: 0 0)}. The nameless form is
+\begin{lstlisting}
+(lambda 2
+  ((lambda 1 ((: 1 0) ((: 0 0) (: 1 1))))
+   (: 0 0)))
+\end{lstlisting}
+The two uses of \code{x} get different addresses because they sit at different depths, while \code{a} and the last \code{x} share the address \code{(: 0 0)} although their names differ.
+\end{example}
+
+\begin{keypoint}[Addresses and $\alpha$-equivalence]
+Two expressions are $\alpha$-equivalent exactly when their nameless forms are identical: renaming a bound variable consistently never changes any address, and a capturing rename does. The same pair also tells an implementation where to find a value: if the environment is a chain of frames, one per binder, \code{(: d p)} means ``go out $d$ frames and take slot $p$'', with no name comparison as in \code{lookup}. With one parameter per \code{lambda}, as in the lambda calculus, the position is always 0 and the depth alone is the \emph{de Bruijn index}.
+\end{keypoint}
+
+\begin{remark}
+Conventions differ between sources: some count from 1, and some treat \code{let} as a binder of its own (it is a \code{lambda} application, \Cref{sec:substrev}). Check which convention a given problem uses.
+\end{remark}
+
+\begin{exercise}[Nameless form]
+Write the nameless form of
+\begin{lstlisting}
+(lambda (x y z)
+  (z (lambda (x y) (z x)) y))
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+The outer binder has parameters \code{x}, \code{y}, \code{z} at positions 0, 1, 2; the inner one has \code{x}, \code{y} at positions 0, 1.
+\begin{itemize}
+  \item The first \code{z} sits directly in the outer \code{lambda}: \code{(: 0 2)}.
+  \item In the inner body \code{(z x)}, \code{z} is not a parameter of the inner binder, so it crosses one binder to reach the outer \code{z}: \code{(: 1 2)}. The \code{x} is the inner one, which shadows the outer \code{x}: \code{(: 0 0)}.
+  \item The last \code{y} is outside the inner \code{lambda}, so it is the outer \code{y}: \code{(: 0 1)}.
+\end{itemize}
+\begin{lstlisting}
+(lambda 3
+  ((: 0 2)
+   (lambda 2 ((: 1 2) (: 0 0)))
+   (: 0 1)))
+\end{lstlisting}
+The inner parameter \code{y} is never used, but it still occupies position 1, and it keeps the outer \code{y} out of reach only inside the inner body.
+\end{solution}

@@ -3,7 +3,7 @@
 
 \subsection{Rename, Then Substitute}
 
-The fix is \emph{capture-avoiding substitution}: before substituting into the body of an inner \code{let}, rename its bound variable to a fresh name that appears nowhere else. Renaming a bound variable never changes what a program means (that was the point of the \code{y}/\code{z} example), so we are free to do it whenever it helps.
+The fix is called \emph{capture-avoiding substitution}. Before substituting into the body of an inner \code{let}, we rename that \code{let}'s bound variable to a fresh name, one that appears nowhere else. This is always allowed. Renaming a bound variable never changes what a program means, which was the point of the \code{y}/\code{z} example. So we are free to rename whenever it helps.
 \begin{lstlisting}[style=repl]
 (let x y (let y 2 (+ x y)))
 ---> (let x y (let g3189 2 (+ x g3189)))    rename the inner y first
@@ -11,11 +11,11 @@ The fix is \emph{capture-avoiding substitution}: before substituting into the bo
 ---> (+ y 2)
 ---> eval: unbound variable                 same answer as the z version
 \end{lstlisting}
-The only question is where the fresh name comes from.
+The only remaining question is where the fresh name comes from.
 
 \subsection{\texttt{gensym}: Fresh Names}
 
-\code{gensym} (``generate symbol'') is a Racket function that returns a brand-new symbol every time it is called:
+\code{gensym} (``generate symbol'') is a Racket function. Every time it is called, it returns a brand-new symbol:
 \begin{lstlisting}[style=repl]
 > (gensym)
 'g3189
@@ -24,31 +24,31 @@ The only question is where the fresh name comes from.
 > (equal? (gensym) (gensym))
 #f
 \end{lstlisting}
-A name chosen by hand, such as \code{'tmp}, does not work: the program might already use \code{tmp}, and then the renaming would create exactly the capture it was meant to avoid.
+A name chosen by hand, such as \code{'tmp}, does not work. The program might already use \code{tmp}. If it does, the renaming would create exactly the capture it was meant to avoid.
 
 \begin{definition}[Uninterned symbol]
 An ordinary symbol is \emph{interned}: \code{'y} is the same symbol wherever it is written, so \rkt|(equal? 'y 'y)| is \code{\#t}. The symbol returned by \code{gensym} is \emph{uninterned}: it is different from every other symbol, including one spelled the same way.
 \end{definition}
-Even if a program literally contained the name \code{g3189}, it would not be \code{equal?} to the \code{g3189} that \code{gensym} returned:
+So even if a program literally contained the name \code{g3189}, that name would not be \code{equal?} to the \code{g3189} returned by \code{gensym}:
 \begin{lstlisting}
 (define g (gensym))                                ; prints as 'g3189
 (equal? g (string->symbol (symbol->string g)))     ; #f
 \end{lstlisting}
-So a gensym can never be captured by, or capture, any name the user wrote.
+This is why a gensym can never be captured by a name the user wrote, and can never capture one either.
 
-\subsubsection{Importing it into \code{plai-typed}} \code{plai-typed} does not provide \code{gensym}, and it cannot check a plain Racket import without knowing its type. \code{typed-in} imports a function from a Racket module and declares its type at the same time:
+\subsubsection{Importing it into \code{plai-typed}} \code{plai-typed} does not provide \code{gensym}. We cannot simply import it from Racket, because the type checker cannot check a plain Racket import without knowing its type. \code{typed-in} solves this. It imports a function from a Racket module and declares its type at the same time:
 \begin{lstlisting}
 (require (typed-in racket/base [gensym : (-> symbol)]))
 \end{lstlisting}
-\code{(-> symbol)} means ``takes no arguments and returns a symbol''. The checker trusts this declaration; it does not check Racket's code.
+The type \code{(-> symbol)} means ``takes no arguments and returns a symbol''. The checker trusts this declaration. It does not check Racket's code.
 
 \subsection{\texttt{subst-lazy-v2}}
 
-Only the binding case changes. If the inner \code{let} binds the same name as the one being replaced, stop, as before. Otherwise:
+Only the binding case changes. If the inner \code{let} binds the same name as the one being replaced, we stop, as before. Otherwise, we do three steps:
 \begin{enumerate}
-  \item let \code{z} be \rkt|(gensym)|, a name that appears nowhere else;
-  \item rename \code{y} to \code{z} in the body: \rkt|(subst-lazy (idC z) y e2)|. This cannot cause capture, because no \code{let} inside \code{e2} binds the fresh \code{z};
-  \item substitute \code{v} for \code{x} in the renamed body.
+  \item Let \code{z} be \rkt|(gensym)|, a name that appears nowhere else.
+  \item Rename \code{y} to \code{z} in the body, with \rkt|(subst-lazy (idC z) y e2)|. This step cannot cause capture, because no \code{let} inside \code{e2} binds the fresh \code{z}.
+  \item Substitute \code{v} for \code{x} in the renamed body.
 \end{enumerate}
 \begin{lstlisting}
 (define (subst-lazy-v2 (v : ArithE) (x : symbol) (e : ArithE)) : ArithE
@@ -69,10 +69,16 @@ Only the binding case changes. If the inner \code{let} binds the same name as th
 (subst-lazy-v2 (idC 'y) 'x (parse '(let y 2 (+ x y))))
 ;; = (letC 'g3445 (numC 2) (plusC (idC 'y) (idC 'g3445)))
 \end{lstlisting}
-The inner \code{y} became \code{g3445}, and the \code{y} that came from outside is still free, so evaluation reports it as unbound. Now the \code{y} and \code{z} versions of the program agree.
+The inner \code{y} became \code{g3445}. The \code{y} that came from outside is still free, so evaluation reports it as unbound. Now the \code{y} version and the \code{z} version of the program agree.
 
-The lecture's version (\code{lec4a.rkt}) splits the \code{letC} case three ways: \code{x} equals \code{y}; \code{y} is \code{possibly-free?} in \code{v}, so rename; otherwise substitute without renaming. Its \code{possibly-free?} is a stub that always returns \code{\#t}, so it behaves exactly like the two-way code above. Implementing \code{possibly-free?} properly, so that renaming happens only when needed, is left as an exercise (see the free-variable definition in \Cref{sec:letsubst}).
+The accompanying code, \code{lec4c.rkt}, splits the \code{letC} case three ways instead of two:
+\begin{itemize}
+  \item \code{x} equals \code{y}: stop;
+  \item \code{y} is \code{possibly-free?} in \code{v}: rename;
+  \item otherwise: substitute without renaming.
+\end{itemize}
+However, its \code{possibly-free?} is a stub that always returns \code{\#t}. So in practice it behaves exactly like the two-way code above. Implementing \code{possibly-free?} properly, so that renaming happens only when it is needed, is left as an exercise (see the definition of free variables, \Cref{def:freevars}).
 
 \begin{remark}
-Step~2 uses the old \code{subst-lazy}, which may capture in general. It is safe here because the expression being substituted, \rkt|(idC z)|, contains only the fresh name \code{z}, which nothing in \code{e2} can bind.
+Step~2 uses the old \code{subst-lazy}, which can capture in general. Here it is safe. The expression being substituted, \rkt|(idC z)|, contains only the fresh name \code{z}, and nothing in \code{e2} can bind that name.
 \end{remark}

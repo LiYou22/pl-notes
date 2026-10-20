@@ -5,11 +5,11 @@ Lecture 4: September 29, 2026. Recitation 4: October 2, 2026.
 
 Supplementary reading:
 \begin{itemize}
-  \item \cite{PLAI} Chapter 5 (Adding Functions to the Language), which implements functions by substitution as this week does, and Chapter 6 (From Substitution to Environments) for where the course goes next.
+  \item \cite{PLAI} Chapter 5 (Adding Functions to the Language), which implements functions by substitution as this chapter does, and Chapter 6 (From Substitution to Environments) for where the notes go next.
   \item \cite{TAPL} Sections 5.2--5.3 (the untyped lambda calculus: free variables, substitution, and $\alpha$-conversion), optional.
 \end{itemize}
 
-Lecture~4 gives the calculator \emph{names} and then \emph{functions}. Both are implemented by substitution, and the lecture's real subject is how subtle substitution is: when to evaluate the thing being substituted, how inner bindings shadow outer ones, and how a careless substitution can \emph{capture} a variable and change a program's meaning. Recitation~4 adds a \code{match} form to the same interpreter. This chapter covers:
+This chapter adds \emph{names} to the calculator, and then \emph{functions}. Both are implemented by substitution. The real subject, though, is how subtle substitution turns out to be. Three questions come up again and again: when to evaluate the expression being substituted, how inner bindings shadow outer ones, and how a careless substitution can \emph{capture} a variable and change what a program means. The last section adds a \code{match} form to the same interpreter. This chapter covers:
 \begin{itemize}
   \item \Cref{sec:letsubst}: \code{idC} and \code{letC}, eager substitution, and shadowing;
   \item \Cref{sec:lazy}: lazy substitution, its costs and benefits, and the variable-capture bug;

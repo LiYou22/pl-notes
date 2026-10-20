@@ -73,7 +73,7 @@ Every evaluation takes the store as input and returns the updated store as outpu
 
 \subsection{Fresh Locations}
 
-\code{(box e)} needs a location that no existing box uses. The lecture first wrote \code{new-loc} like this, and then commented it out:
+\code{(box e)} needs a location that no existing box uses. A first attempt at \code{new-loc}, commented out because it is wrong:
 \begin{lstlisting}
 #|
 (define new-loc
@@ -156,7 +156,7 @@ Now the \code{let} runs once and creates one box, and \code{new-loc} is a closur
 \end{figure}
 
 \begin{pitfall}[Passing the wrong store]
-Every store has type \tyname{Store}, so the type checker accepts any of \code{sto}, \code{sto1}, \code{sto2} in any position. Two plausible slips in \code{plusC} are evaluating \code{e2} in \code{sto}, and returning \code{sto1}. Each is caught by a program that writes to a box inside one operand (these variants are not lecture code):
+Every store has type \tyname{Store}, so the type checker accepts any of \code{sto}, \code{sto1}, \code{sto2} in any position. Two plausible slips in \code{plusC} are evaluating \code{e2} in \code{sto}, and returning \code{sto1}. Each is caught by a program that writes to a box inside one operand (these two variants are deliberately wrong):
 \begin{lstlisting}
 (let b (box 0) (+ (begin (set-box! b 5) 0) (unbox b)))   ; P1
 (let b (box 0) (begin (+ 0 (begin (set-box! b 5) 0)) (unbox b)))   ; P2
@@ -164,7 +164,7 @@ Every store has type \tyname{Store}, so the type checker accepts any of \code{st
 \begin{center}
 \begin{tabular}{@{}lccc@{}}
 \toprule
-program & lecture \code{plusC} & \code{e2} gets \code{sto} & returns \code{sto1} \\
+program & correct \code{plusC} & \code{e2} gets \code{sto} & returns \code{sto1} \\
 \midrule
 P1 & \code{(numV 5)} & \textcolor{sigc}{\code{(numV 0)}} & \code{(numV 5)} \\
 P2 & \code{(numV 5)} & \code{(numV 5)} & \textcolor{sigc}{\code{(numV 0)}} \\
@@ -176,7 +176,7 @@ Evaluating \code{e2} in \code{sto} makes \code{e2} blind to \code{e1}'s writes; 
 
 \subsection{\texttt{let} Is Application, Again}
 
-\code{letC} would need the same threading: evaluate \code{e1} in \code{sto}, then the body in the resulting store. The lecture avoids writing it by turning \code{let} into application, the equation of \Cref{sec:substrev}:
+\code{letC} would need the same threading: evaluate \code{e1} in \code{sto}, then the body in the resulting store. We avoid writing it by turning \code{let} into application, the equation of \Cref{sec:substrev}:
 \begin{lstlisting}
     [letC (x e1 e2) (eval-env env sto (appC (lambdaC x e2) e1))]
 \end{lstlisting}
@@ -195,7 +195,7 @@ The rewriting happens in \code{eval-env} rather than in \code{parse}, but the ef
                                   sto2
                                   (closV-e v1))])])]
 \end{lstlisting}
-The body gets its environment and its store from different places. The environment is the closure's, \code{(closV-env v1)}, extended with the parameter: lexical scope, unchanged from \code{lecture5e.rkt}, whose comment the clause keeps (``we're going to use and extend the saved environment from the closure, instead of the current environment''). The store is \code{sto2}, the \emph{current} one. A closure saves an environment but no store, and \code{closV} has no field for one.
+The body gets its environment and its store from different places. The environment is the closure's, \code{(closV-env v1)}, extended with the parameter: lexical scope, unchanged from \Cref{sec:closures}: the body uses and extends the environment saved in the closure, not the current one. The store is \code{sto2}, the \emph{current} one. A closure saves an environment but no store, and \code{closV} has no field for one.
 
 \begin{keypoint}[Environment vs.\ store]
 The environment follows the program text: it is saved in closures and restored when they are called, so a name means what it meant where it was written. The store follows time: it is passed from each step to the next in execution order and is never saved or restored, so a box's contents are whatever was last written, wherever the reading code was written.

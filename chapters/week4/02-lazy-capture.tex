@@ -3,13 +3,13 @@
 
 \subsection{Lazy Substitution}
 
-An alternative: do not evaluate \code{e1} first. Substitute the unevaluated tree into the body, where it is evaluated each time the body uses it.
+There is another way to implement \code{let}: do not evaluate \code{e1} first. Instead, substitute the unevaluated tree into the body. It is then evaluated each time the body uses it.
 \begin{lstlisting}[style=repl]
 (let x (+ 1 1) (+ x 2))
 eager:  ---> (let x 2 (+ x 2))  ---> (+ 2 2)  ---> 4
 lazy:   ---> (+ (+ 1 1) 2)                    ---> 4
 \end{lstlisting}
-\code{subst-lazy} is \code{subst-eager} with \code{v} an \tyname{ArithE}, the unevaluated \code{e1}, which goes into the tree as is, with no \code{numC} wrapping:
+\code{subst-lazy} is almost the same as \code{subst-eager}. The only difference is that \code{v} is now an \tyname{ArithE}, namely the unevaluated \code{e1}. Since it is already a tree, it goes into the body as is, with no \code{numC} wrapping:
 \begin{lstlisting}
 (define (subst-lazy (v : ArithE) (x : symbol) (e : ArithE)) : ArithE
   (type-case ArithE e
@@ -32,20 +32,20 @@ lazy:   ---> (+ (+ 1 1) 2)                    ---> 4
 \end{lstlisting}
 
 \begin{pitfall}[Mixing evaluators]
-Every recursive call in \code{eval-lazy} must be to \code{eval-lazy}. If one called \code{eval-eager}, the type checker would not complain, since both return a number, but inner \code{let}s would silently become eager.
+Every recursive call in \code{eval-lazy} must be to \code{eval-lazy}. Suppose one of them called \code{eval-eager} instead. The type checker would not complain, because both functions return a number. But inner \code{let}s would then silently become eager.
 \end{pitfall}
 
 \subsection{Is Lazy More Efficient?}
 
-When \code{x} is unused, yes: \code{e1} is never evaluated.
+It is when \code{x} is unused, because then \code{e1} is never evaluated.
 \begin{lstlisting}[style=repl]
 (let x (+ 5 6) 10)
 eager:  (let x 11 10) ---> 10      (+ 5 6) computed once, for nothing
 lazy:   10                         (+ 5 6) never computed
 \end{lstlisting}
-So \code{(let x (/ 5 0) 10)} would not be an error in the lazy version (if the language had \code{/}), and neither is an unbound name in \code{e1}: \code{(let x (+ y y) 10)} is an error eagerly but 10 lazily.
+This also changes which programs fail. If the language had \code{/}, then \code{(let x (/ 5 0) 10)} would not be an error in the lazy version. The same goes for an unbound name in \code{e1}: \code{(let x (+ y y) 10)} is an error eagerly, but 10 lazily.
 
-When \code{x} is used more than once, lazy is \emph{less} efficient, since \code{e1} is recomputed at every use:
+When \code{x} is used more than once, lazy is \emph{less} efficient. The reason is that \code{e1} is recomputed at every use:
 \begin{lstlisting}[style=repl]
 (let x (+ 5 6) (+ (+ x x) x))
 eager:  (+ 5 6) once     ---> (+ (+ 11 11) 11)
@@ -64,7 +64,7 @@ program & eager & lazy \\
 \bottomrule
 \end{tabular}
 \end{center}
-The first difference is harmless: \code{x} is unused, so lazy never evaluates \code{e1} and never notices the unbound \code{y}. The second is a real bug.
+The first difference is harmless. Since \code{x} is unused, the lazy version never evaluates \code{e1}, so it never notices the unbound \code{y}. The second difference, however, is a real bug.
 
 \subsection{Variable Capture}
 
@@ -75,7 +75,9 @@ lazy:
 ---> (+ 2 2)
 ---> 4
 \end{lstlisting}
-The outer \code{y} is free: nothing binds it, so the correct answer is an error. Racket agrees; the same program in \code{\#lang racket} is rejected with \code{y: unbound identifier} before it runs. But lazy substitution moved that free \code{y} underneath \code{(let y 2 ...)}, where it now refers to the inner \code{y} (\Cref{fig:capture}).
+The outer \code{y} is free, because nothing binds it. So the correct answer is an error. Racket agrees: the same program in \code{\#lang racket} is rejected with \code{y: unbound identifier} before it runs.
+
+What went wrong? Lazy substitution moved that free \code{y} underneath \code{(let y 2 ...)}. There, it now refers to the inner \code{y} (\Cref{fig:capture}).
 
 \begin{figure}[htbp]
 \centering
@@ -99,7 +101,7 @@ The outer \code{y} is free: nothing binds it, so the correct answer is an error.
 \label{fig:capture}
 \end{figure}
 
-Now rename the inner \code{y} to \code{z}:
+To see that this is a bug, rename the inner \code{y} to \code{z} and run the program again:
 \begin{lstlisting}[style=repl]
 (let x y (let z 2 (+ x z)))
 lazy:
@@ -109,7 +111,7 @@ lazy:
 \end{lstlisting}
 
 \begin{keypoint}[Names of bound variables should not matter]
-The two programs differ only in renaming the inner \code{y} to \code{z}, so they must mean the same thing. Yet lazy substitution gives 4 for one and an error for the other. This bug is called \emph{variable capture}, and a substitution that can cause it is \emph{capturing}.
+The two programs differ only in renaming the inner \code{y} to \code{z}, so they must mean the same thing. Yet lazy substitution gives 4 for one and an error for the other. This bug is called \emph{variable capture}, and a substitution that can cause it is called \emph{capturing}.
 \end{keypoint}
 
-\code{eval-eager} does not have this problem: it only ever substitutes numbers, and a number contains no names to capture. Lazy substitution substitutes whole expressions, which can contain free variables. (Once values can be functions, eager evaluation substitutes code too, and capture returns; see \Cref{sec:eagerapp}.)
+\code{eval-eager} does not have this problem. It only ever substitutes numbers, and a number contains no names that could be captured. Lazy substitution is different: it substitutes whole expressions, and those can contain free variables. (Once values can be functions, eager evaluation substitutes code too, and capture comes back; see \Cref{sec:eagerapp}.)

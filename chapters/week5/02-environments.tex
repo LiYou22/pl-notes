@@ -9,10 +9,10 @@ Every interpreter since \Cref{sec:letsubst} has had to answer one question: in
 \end{lstlisting}
 when \code{eval} reaches the \code{x} in \code{(+ x x)}, where does the 5 come from? There are two answers (\Cref{fig:twoways}).
 \begin{itemize}
-  \item \textbf{Substitution} (week~4). Before evaluating the body, rewrite it: replace every \code{x} by the value. The body becomes \code{(+ 5 5)}, which contains no names at all, so evaluating it never has to ask about \code{x}.
-  \item \textbf{Environments} (this week). Leave the body exactly as written. Evaluate it together with a table, the \emph{environment}, that says \code{x = 5}. When evaluation reaches \code{x}, look it up in the table.
+  \item \textbf{Substitution} (\Cref{ch:week4}). Before evaluating the body, rewrite it: replace every \code{x} by the value. The body becomes \code{(+ 5 5)}, which contains no names at all, so evaluating it never has to ask about \code{x}.
+  \item \textbf{Environments} (this chapter). Leave the body exactly as written. Evaluate it together with a table, the \emph{environment}, that says \code{x = 5}. When evaluation reaches \code{x}, look it up in the table.
 \end{itemize}
-Both give 10. \code{lecture5a.rkt} goes back to the simplest language with names, numbers and eager \code{let}, and implements it the second way. The rest of the week is about making the second answer agree with the first in \emph{every} program, not just this one.
+Both give 10. Version 5a goes back to the simplest language with names, numbers and eager \code{let}, and implements it the second way. The rest of the chapter is about making the second answer agree with the first in \emph{every} program, not just this one.
 
 \begin{figure}[htbp]
 \centering
@@ -31,13 +31,13 @@ Both give 10. \code{lecture5a.rkt} goes back to the simplest language with names
   \draw[arr] (e1) -- node[right, lbl] {evaluate, looking \code{x} up} (e2);
   \draw[densely dotted] (e1) -- (tab);
   \node[lbl, below=1mm of s2] {substitution (week 4)};
-  \node[lbl, below=1mm of e2] {environment (this week)};
+  \node[lbl, below=1mm of e2] {environment (this chapter)};
 \end{tikzpicture}
 \caption{Two implementations of the same \code{let}. Substitution changes the program; an environment changes only what \code{eval} carries along.}
 \label{fig:twoways}
 \end{figure}
 
-The lecture files call the expression type \tyname{Expr} rather than \tyname{ArithE}; the variants are the same. \code{lecture5a.rkt} drops \code{lambdaC} and \code{appC} again, so its only values are numbers and \code{eval} returns a \code{number}:
+From here on the expression type is called \tyname{Expr} rather than \tyname{ArithE}; the variants are the same. Version 5a drops \code{lambdaC} and \code{appC} again, so its only values are numbers and \code{eval} returns a \code{number}:
 \begin{lstlisting}
 (define-type Expr
   [numC (n : number)]
@@ -117,7 +117,7 @@ Write the environment next to each step. \code{eval} starts with \code{[]}:
 ---> 10
 \end{lstlisting}
 
-\paragraph{Shadowing comes for free.} The new binding goes on the front, and \code{lookup} returns the first match, so an inner binding hides an outer one of the same name (\Cref{fig:envstack}). This is the comment \code{(+ x x) ---- '((bind x 6) (bind x 5))} from lecture:
+\paragraph{Shadowing comes for free.} The new binding goes on the front, and \code{lookup} returns the first match, so an inner binding hides an outer one of the same name (\Cref{fig:envstack}). When \code{(+ x x)} is evaluated, the environment is \code{'((bind x 6) (bind x 5))}:
 \begin{lstlisting}[style=repl]
 (let x 5 (let x 6 (+ x x)))         env = []
   evaluate 5                        ---> 5
@@ -146,7 +146,7 @@ Substitution needed the \rkt|(equal? x y)| test in \code{subst-eager} to get thi
 \label{fig:envstack}
 \end{figure}
 
-\paragraph{Scope comes from passing the env down.} \code{eval-env} passes the extended environment only \emph{into} the body of the \code{let}; it never returns it. So a binding is visible exactly inside its own body. The lecture's example is \code{(+ (let x 5 (+ 3 x)) e2)}:
+\paragraph{Scope comes from passing the env down.} \code{eval-env} passes the extended environment only \emph{into} the body of the \code{let}; it never returns it. So a binding is visible exactly inside its own body. For example, \code{(+ (let x 5 (+ 3 x)) e2)}:
 \begin{lstlisting}[style=repl]
 (+ (let x 5 (+ 3 x)) x)             env = []
   left:  (let x 5 (+ 3 x))          env = []
@@ -175,7 +175,7 @@ A program may still shadow them: \code{(let pi 3 pi)} is 3. The substitution int
 \subsection{Checking Against Substitution}
 \label{sec:envcheck}
 
-\code{lecture5a.rkt} ends with ``our old substitution evaluator for comparison'', the eager interpreter of \Cref{sec:letsubst} under new names:
+For comparison we keep the old substitution evaluator, the eager interpreter of \Cref{sec:letsubst} under new names:
 \begin{lstlisting}
 (define (eval-subst (e : Expr)) : number
   (type-case Expr e
@@ -203,5 +203,5 @@ program & \code{eval-subst} & \code{eval} \\
 The last program checks that \code{e1} is evaluated in the \emph{outer} environment: \code{(* x 2)} sees \code{x=5}, and only then is \code{x=10} pushed for the body.
 
 \begin{keypoint}[Environment vs.\ substitution, for \code{let}]
-For this language the two interpreters always agree: each binding in \code{env} is a substitution that has been \emph{postponed} until the name is actually reached. Instead of copying 5 into every \code{x} of the body up front, \code{eval-env} remembers \code{x=5} and fills it in on demand. Substitution is the reference: whenever a later environment interpreter disagrees with it, the environment interpreter has a scope bug. That is how the lecture finds both bugs of \Cref{sec:dynscope,sec:closures}.
+For this language the two interpreters always agree: each binding in \code{env} is a substitution that has been \emph{postponed} until the name is actually reached. Instead of copying 5 into every \code{x} of the body up front, \code{eval-env} remembers \code{x=5} and fills it in on demand. Substitution is the reference: whenever a later environment interpreter disagrees with it, the environment interpreter has a scope bug. That is how we find both bugs of \Cref{sec:dynscope,sec:closures}.
 \end{keypoint}

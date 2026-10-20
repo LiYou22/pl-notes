@@ -56,7 +56,7 @@ Following \cite[Chapters~2--3]{PLAI}, the work is split into separate steps (\Cr
 \begin{itemize}
   \item \textbf{Concrete syntax} is what the programmer types, the text \code{(+ 2 3)}. Racket's \emph{reader} already turns text into an s-expression, so we get that step for free; quote is how we hand an s-expression over directly.
   \item \textbf{Abstract syntax} is a tree that keeps only the meaning. \code{parse} turns an s-expression into this tree, rejecting anything that is not a valid program.
-  \item The \textbf{interpreter} walks the tree and computes the answer. \cite{PLAI} calls it \code{interp}; in lecture it is \code{eval}.
+  \item The \textbf{interpreter} walks the tree and computes the answer. \cite{PLAI} calls it \code{interp}; here it is \code{eval}.
 \end{itemize}
 
 \begin{figure}[htbp]
@@ -115,7 +115,7 @@ The operands of \code{plusC} are \tyname{ArithE}, not \code{number}. That is wha
 \end{lstlisting}
 Three variants, three clauses, and a recursive call wherever the type mentions \tyname{ArithE}. \code{eval} never checks whether its input makes sense, and it does not have to: a value of type \tyname{ArithE} can only be built from the three constructors, so every tree it receives is well formed.
 
-\subsubsection{The parser} That guarantee has to come from somewhere, and it comes from \code{parse}. The version written in lecture:
+\subsubsection{The parser} That guarantee has to come from somewhere, and it comes from \code{parse}. A minimal version:
 \begin{lstlisting}
 (define (parse (s : s-expression)) : ArithE
   (cond
@@ -130,7 +130,7 @@ A number becomes a \code{numC}. A list is dispatched on its first element with \
 
 \subsection{What Malformed Input Does}
 
-The lecture parser is right on well-formed input, but on bad input it either crashes with a message about something else, or quietly builds a wrong tree:
+This parser is right on well-formed input, but on bad input it either crashes with a message about something else, or quietly builds a wrong tree:
 \begin{center}
 \begin{tabular}{@{}ll@{}}
 \toprule

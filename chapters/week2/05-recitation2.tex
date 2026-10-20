@@ -1,7 +1,7 @@
 \section{Recitation 2: Boolean Expressions}
 \label{sec:rec2}
 
-This recitation builds the course's first interpreter and first program transformation, for a tiny language of Boolean expressions. Everything is in plain Racket, with structs and \code{match}.
+This section builds the first interpreter and first program transformation, for a tiny language of Boolean expressions. Everything is in plain Racket, with structs and \code{match}.
 
 \subsection{The Language and Its Representation}
 
@@ -64,7 +64,7 @@ One clause per variant, and a recursive call wherever a variant contains a sub-e
 The third test swaps the arguments of the second; testing both orders is cheap and catches an implementation that looks at only one side.
 \end{solution}
 
-This is the pattern of every interpreter in the course: our language's $\land$ is implemented by Racket's \code{and}, its $\lor$ by \code{or}, its $\neg$ by \code{not}. The \emph{meaning} of each construct is given by the clause that handles it.
+This is the pattern of every interpreter in these notes: our language's $\land$ is implemented by Racket's \code{and}, its $\lor$ by \code{or}, its $\neg$ by \code{not}. The \emph{meaning} of each construct is given by the clause that handles it.
 
 \subsubsection{Missing cases} What happens with an incomplete \code{match}?
 \begin{lstlisting}
@@ -127,7 +127,7 @@ Both become executable checks:
 \end{lstlisting}
 \code{is-optimizing?} relies on \code{match} trying clauses in order: \rkt|(not-node (leaf-node v))| is tried first, so the catch-all \rkt|(not-node _)| sees only negations of compound expressions, which mean the pass left work undone. Note also that \code{preserves-sem?} takes only the input and calls \code{demorgan-opt} itself, so it tests the optimizer rather than a hand-written answer.
 
-\subsubsection{The optimizer} What to do with a negation depends entirely on what is \emph{inside} it, so a single \rkt|(not-node b1)| clause cannot work. Nested patterns split it into the four shapes the argument can have, one per variant. This is what the handout means by ``you will need more cases than in \code{evaluate-bexp}'':
+\subsubsection{The optimizer} What to do with a negation depends entirely on what is \emph{inside} it, so a single \rkt|(not-node b1)| clause cannot work. Nested patterns split it into the four shapes the argument can have, one per variant. This is why the optimizer needs more cases than \code{evaluate-bexp}:
 \begin{lstlisting}
 (define (demorgan-opt b)
   (match b
@@ -206,6 +206,6 @@ The semantic tests check the two correctness properties without writing the expe
 \code{bexp-4} to \code{bexp-6} are \code{bexp-1} to \code{bexp-3} with \code{\#t} and \code{\#f} in place of \code{'P} and \code{'Q}. With symbols at the leaves, \code{evaluate-bexp} is meaningless: \rkt|(not 'P)| is \code{\#f} and \rkt|(or 'P #f)| is \code{'P}, because Racket treats every value except \code{\#f} as true. So a semantic check only means something on Boolean leaves.
 \end{remark}
 
-\begin{remark}[The handout's table]
-An earlier version of the handout listed $\neg(\neg P \land Q) \mapsto P \land Q$ as the first example. That contradicts both the code (\code{bexp-1} is built with \code{or-node}) and De Morgan's law; the posted solution corrects the row to $\neg(\neg P \lor Q) \mapsto P \land \neg Q$. Trust the definitions over the prose, and check the prose by working one example by hand.
+\begin{remark}[Checking the table]
+It is easy to write the first example as $\neg(\neg P \land Q) \mapsto P \land Q$. That contradicts both the code (\code{bexp-1} is built with \code{or-node}) and De Morgan's law; the correct row is $\neg(\neg P \lor Q) \mapsto P \land \neg Q$. Trust the definitions over the prose, and check the prose by working one example by hand.
 \end{remark}

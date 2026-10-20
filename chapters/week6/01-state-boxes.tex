@@ -3,7 +3,7 @@
 
 \subsection{Four New Constructs}
 
-The starting file is ``a starting point for today's exploration of mutable state''. It takes the closure interpreter of \code{lecture5e.rkt} (\Cref{sec:closures}) and adds four constructs to \tyname{Expr}: \code{boxC} creates a box, \code{unboxC} reads its contents, \code{setboxC} updates them, and \code{seqC} is Racket's \code{(begin e1 e2)}.
+We start from the closure interpreter of \Cref{sec:closures} and add four constructs to \tyname{Expr}: \code{boxC} creates a box, \code{unboxC} reads its contents, \code{setboxC} updates them, and \code{seqC} is Racket's \code{(begin e1 e2)}.
 \begin{lstlisting}
 (define-type Expr
   [numC (n : number)]
@@ -37,11 +37,11 @@ concrete syntax & abstract syntax & meaning \\
 \bottomrule
 \end{tabular}
 \end{center}
-\code{begin} takes exactly two expressions, so a longer sequence is written with nested \code{begin}s. That is all the starting file provides: \tyname{Value} is still \code{numV} and \code{closV}, and \code{eval-env} is the one of \code{lecture5e.rkt} with an \code{else} clause that reports the new variants as unimplemented. The rest of the lecture writes the four clauses, twice.
+\code{begin} takes exactly two expressions, so a longer sequence is written with nested \code{begin}s. At this point \tyname{Value} is still \code{numV} and \code{closV}, and \code{eval-env} is the one of \Cref{sec:closures} with an \code{else} clause that reports the new variants as unimplemented. The rest of the chapter writes the four clauses, twice.
 
 \subsection{The Examples}
 
-The file ends with five test programs:
+Five test programs:
 \begin{lstlisting}
 (define ex1 (parse '(begin (+ 1 1) (+ 2 2))))
 (define ex2 (parse '(let b (box 0) (set-box! b 1))))

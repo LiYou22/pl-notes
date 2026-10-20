@@ -3,7 +3,7 @@
 
 \subsection{The Plan}
 
-At the end of \Cref{ch:week3} the calculator had \code{numC}, \code{plusC}, and \code{timesC}. The first new form is \code{(let x e1 e2)}: compute \code{e1}, replace every \code{x} in \code{e2} with that value, then compute \code{e2}.
+At the end of \Cref{ch:week3}, the calculator had three forms: \code{numC}, \code{plusC}, and \code{timesC}. This section adds names, through a new form \code{(let x e1 e2)}. It means: compute \code{e1}, replace every \code{x} in \code{e2} with the result, and then compute \code{e2}.
 \begin{lstlisting}[style=repl]
 (let x 5 (+ x x))
 ---> (+ 5 5)                 replace every x in the body with 5
@@ -25,19 +25,21 @@ At the end of \Cref{ch:week3} the calculator had \code{numC}, \code{plusC}, and 
   [timesC (e1 : ArithE) (e2 : ArithE)]
   [letC (x : symbol) (e1 : ArithE) (e2 : ArithE)])
 \end{lstlisting}
-(\Cref{sec:lambda} adds two more variants for functions; from then on every function on \tyname{ArithE} has a case for them.)
+\Cref{sec:lambda} will add two more variants for functions, and from then on every function on \tyname{ArithE} needs a case for them.
 
-\subsubsection{What is \code{idC} for?} An \code{idC} is a \emph{use} of a name, such as the \code{x} in \code{(+ x 1)}. The operands of \code{plusC} must be \tyname{ArithE}s, so a bare symbol \code{'x} cannot go there; \code{idC} wraps the symbol so a name can sit in the tree until substitution replaces it. It does for symbols what \code{numC} does for numbers.
+\subsubsection{What is \code{idC} for?} An \code{idC} represents a \emph{use} of a name, such as the \code{x} in \code{(+ x 1)}. We need it because of types. The operands of \code{plusC} must be \tyname{ArithE}s, and a bare symbol like \code{'x} is not one. Wrapping the symbol in \code{idC} turns it into an \tyname{ArithE}, so the name can sit in the tree until substitution replaces it. In this sense, \code{idC} does for symbols what \code{numC} does for numbers.
 
-A name appears in two roles, and only one of them is an \code{idC}:
+A name can appear in two roles, and only one of them becomes an \code{idC}:
 \begin{lstlisting}
 ;; (let x 5 (+ x 1))
 (letC 'x (numC 5) (plusC (idC 'x) (numC 1)))
 ;;    ^ binding: a plain symbol    ^ use: an idC
 \end{lstlisting}
-The name right after \code{let} is being \emph{bound}. It is a plain symbol field of \code{letC}, because it is never evaluated or replaced; it only tells substitution which name to look for. Symbols like \code{+} and \code{let} never become \code{idC}s either: \code{parse} consumes them to decide which variant to build. Writing \rkt|(plusC 'x (numC 1))| is a type error, since \code{'x} is a \tyname{symbol} and not an \tyname{ArithE}.
+The name right after \code{let} is the one being \emph{bound}. It is stored as a plain symbol in \code{letC}, because it is never evaluated or replaced. Its only job is to tell substitution which name to look for.
 
-\subsubsection{Parsing} A lone symbol becomes an \code{idC}. In \code{(let x e1 e2)} the \code{x} is taken as a plain symbol, while \code{e1} and \code{e2} are parsed recursively:
+Keywords like \code{+} and \code{let} never become \code{idC}s either, because \code{parse} uses them up when it decides which variant to build. Note also that \rkt|(plusC 'x (numC 1))| is a type error: \code{'x} is a \tyname{symbol}, not an \tyname{ArithE}.
+
+\subsubsection{Parsing} A lone symbol becomes an \code{idC}. In \code{(let x e1 e2)}, the \code{x} is kept as a plain symbol, and \code{e1} and \code{e2} are parsed recursively:
 \begin{lstlisting}
 (define (parse (s : s-expression)) : ArithE
   (cond
@@ -50,11 +52,11 @@ The name right after \code{let} is being \emph{bound}. It is a plain symbol fiel
          [(*) (timesC (parse (second l)) (parse (third l)))]
          [(let) (letC (s-exp->symbol (second l)) (parse (third l)) (parse (fourth l)))]))]))
 \end{lstlisting}
-As in lecture~3, there is no error checking: \rkt|(parse '(let x 1))| fails inside \code{fourth} with \code{list contains too few elements}.
+As in \Cref{sec:calc}, this parser does no error checking. For example, \rkt|(parse '(let x 1))| fails inside \code{fourth}, with the message \code{list contains too few elements}.
 
 \subsection{Eager Substitution}
 
-\rkt|(subst-eager v x e)| replaces every \code{x} in \code{e} with the number \code{v}. Most variants just recurse into their children; the interesting cases are the ones that mention names.
+\rkt|(subst-eager v x e)| replaces every \code{x} in \code{e} with the number \code{v}. Most cases simply recurse into the children. The interesting cases are the two that involve names, \code{idC} and \code{letC}.
 \begin{lstlisting}
 (define (subst-eager (v : number) (x : symbol) (e : ArithE)) : ArithE
   (type-case ArithE e
@@ -68,14 +70,14 @@ As in lecture~3, there is no error checking: \rkt|(parse '(let x 1))| fails insi
                 (if (equal? x y) e2 (subst-eager v x e2)))]))
 \end{lstlisting}
 
-\subsubsection{Why \code{(numC v)} and \code{(idC y)}?} \code{subst-eager} returns an \tyname{ArithE} tree, but \code{v} is a number, so it is wrapped as \rkt|(numC v)| to go back into the tree. An \code{idC} for a different name is left alone: \rkt|(idC y)| rebuilds the same node, which is equivalent to returning \code{e}.
+\subsubsection{Why \code{(numC v)} and \code{(idC y)}?} \code{subst-eager} must return an \tyname{ArithE}, but \code{v} is a number. So when it finds the name, it wraps \code{v} as \rkt|(numC v)| before putting it back into the tree. When it finds a different name, it leaves that name alone: \rkt|(idC y)| rebuilds the same node, which is the same as returning \code{e}.
 \begin{lstlisting}
 (subst-eager 5 'x (plusC (idC 'x) (idC 'y)))   ; = (plusC (numC 5) (idC 'y))
 \end{lstlisting}
 
 \subsection{Shadowing}
 
-What is \code{(let x 5 (let x 6 (+ x x)))}: 12 or 10? The answer is 12. The inner \code{let} binds its own \code{x}, so inside its body \code{x} means 6: the inner \code{x} \emph{shadows} the outer one (\Cref{fig:shadow}).
+What is \code{(let x 5 (let x 6 (+ x x)))}: 12 or 10? The answer is 12. The inner \code{let} binds its own \code{x}, so inside its body, \code{x} means 6. We say the inner \code{x} \emph{shadows} the outer one (\Cref{fig:shadow}).
 
 \begin{figure}[htbp]
 \centering
@@ -95,14 +97,16 @@ What is \code{(let x 5 (let x 6 (+ x x)))}: 12 or 10? The answer is 12. The inne
 \label{fig:shadow}
 \end{figure}
 
-That is the \rkt|(equal? x y)| check in the \code{letC} case: when an inner \code{let} binds the same name we are substituting for, substitution stops at its body.
+This is what the \rkt|(equal? x y)| check in the \code{letC} case is for. If an inner \code{let} binds the same name we are substituting for, substitution does not go into that \code{let}'s body.
 \begin{lstlisting}[style=repl]
 (let x 5 (let x 6 (+ x x)))
 ---> (let x 6 (+ x x))       the outer subst leaves the inner body alone
 ---> (+ 6 6)
 ---> 12
 \end{lstlisting}
-Substituting blindly would give \code{(let x 6 (+ 5 5))}, which is 10. The inner \code{e1} is still substituted, because it sits \emph{outside} the inner binding; the inner \code{x} exists only in the inner body:
+Without the check, substitution would produce \code{(let x 6 (+ 5 5))}, which is 10.
+
+The check only protects the inner \emph{body}. The inner \code{e1} is still substituted, because it lies \emph{outside} the inner binding: the inner \code{x} is visible only in the inner body.
 \begin{lstlisting}[style=repl]
 (let x 1 (let x (+ x 1) x))
 ---> (let x (+ 1 1) x)       the x in e1 is the outer x
@@ -120,7 +124,9 @@ Substituting blindly would give \code{(let x 6 (+ 5 5))}, which is 10. The inner
     [timesC (e1 e2) (* (eval-eager e1) (eval-eager e2))]
     [letC (y e1 e2) (eval-eager (subst-eager (eval-eager e1) y e2))]))
 \end{lstlisting}
-The \code{letC} line is the plan written out: evaluate \code{e1}, substitute the resulting number for \code{y} in \code{e2}, and evaluate the result. \code{eval-eager} never meets an \code{idC} that some \code{let} bound, because the enclosing \code{letC} has already substituted it away. An \code{idC} that survives was never bound, as in \code{(+ x 1)}, so it is an error.
+The \code{letC} line follows the plan exactly: evaluate \code{e1}, substitute the resulting number for \code{y} in \code{e2}, and evaluate what comes out.
+
+Why is the \code{idC} case an error? If a name is bound by some \code{let}, that \code{let} substitutes it away before \code{eval-eager} ever reaches it. So any \code{idC} that \code{eval-eager} does see was never bound, as in \code{(+ x 1)}, and that is an error.
 \begin{lstlisting}[style=repl]
 (let x 5 (let y (+ x 1) (* x y)))
 letC x: eval e1 = 5, subst 5 for x in the body
@@ -129,4 +135,4 @@ letC y: eval e1 = 6, subst 6 for y in the body
 ---> (* 5 6)
 ---> 30
 \end{lstlisting}
-Each \code{let} removes the \code{idC}s for its own name; once every \code{let} has been processed, none is left.
+Each \code{let} removes the \code{idC}s for its own name. Once every \code{let} has been processed, no \code{idC} is left.

@@ -1,7 +1,7 @@
 \section{Recitation 3: Typed Boolean Expressions and Pattern Matching}
 \label{sec:rec3}
 
-Recitation~3 has two halves. Part~A (handout 3a) redoes Recitation~2's interpreter and De Morgan optimizer in \code{plai-typed}, to see what the type checker buys. Part~B (handout 3b) returns to plain Racket and studies \code{match}: literal patterns, wildcards, and taking lists apart.
+This section has two halves. Part~A redoes the interpreter and De Morgan optimizer of \Cref{sec:rec2} in \code{plai-typed}, to see what the type checker buys. Part~B returns to plain Racket and studies \code{match}: literal patterns, wildcards, and taking lists apart.
 
 \subsection{Part A: Boolean Expressions, Typed}
 
@@ -18,7 +18,7 @@ Recitation~3 has two halves. Part~A (handout 3a) redoes Recitation~2's interpret
 Implement \code{evaluate-bexp-b} with \code{type-case}.
 \end{exercise}
 \begin{solution}
-\code{type-case} plays the role \code{match} played last week:
+\code{type-case} plays the role \code{match} played in \Cref{sec:rec2}:
 \begin{lstlisting}
 (define (evaluate-bexp-b [b : bexp-b]) : boolean
   (type-case bexp-b b
@@ -31,7 +31,7 @@ Implement \code{evaluate-bexp-b} with \code{type-case}.
 (test (evaluate-bexp-b (and-node-b (leaf-node-b #t) (leaf-node-b #f))) #f)
 (test (evaluate-bexp-b (not-node-b (or-node-b (leaf-node-b #f) (leaf-node-b #f)))) #t)
 \end{lstlisting}
-\code{test} is \code{plai-typed}'s \code{check-expect}, and \rkt|(print-only-errors true)| at the top of the file makes passing tests silent. This is the same shape as \code{eval} for \tyname{ArithE} in \Cref{sec:calc}.
+\code{test} is \code{plai-typed}'s \code{check-expect}, and \rkt|(print-only-errors true)| at the top of a program makes passing tests silent. This is the same shape as \code{eval} for \tyname{ArithE} in \Cref{sec:calc}.
 \end{solution}
 
 \subsubsection{What do the types buy us?}
@@ -83,7 +83,7 @@ Last week's \code{match} could name a nested pattern directly, such as \rkt|(not
                                    (demorgan-opt (not-node b3)))]
         [not-node (b2) (demorgan-opt b2)])]))
 \end{lstlisting}
-The inner clauses are the four nested patterns of last week, one per variant of the negated expression: a negated leaf stays; $\neg(b_2 \land b_3)$ becomes $\neg b_2 \lor \neg b_3$ with both new negations optimized again; $\neg(b_2 \lor b_3)$ symmetrically; and $\neg\neg b_2$ becomes the optimized $b_2$. Both \code{type-case}s are checked for exhaustiveness, so a forgotten shape of negation is now a static error.
+The inner clauses are the four nested patterns of \Cref{sec:rec2}, one per variant of the negated expression: a negated leaf stays; $\neg(b_2 \land b_3)$ becomes $\neg b_2 \lor \neg b_3$ with both new negations optimized again; $\neg(b_2 \lor b_3)$ symmetrically; and $\neg\neg b_2$ becomes the optimized $b_2$. Both \code{type-case}s are checked for exhaustiveness, so a forgotten shape of negation is now a static error.
 \end{solution}
 
 The tests no longer need \code{syn-equal?}: \code{test} compares \code{define-type} values structurally.

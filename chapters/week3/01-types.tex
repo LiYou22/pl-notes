@@ -19,7 +19,7 @@ At the REPL, every answer comes with two lines: the type the checker worked out,
 > (+ 3 "hello")
 typecheck failed: number vs. string
 \end{lstlisting}
-This is the idea of the lecture in miniature: the type is known \emph{before} the value is computed. The checker does not run \rkt|(+ 3 4)| to find out it is a number; it knows because \code{+} takes numbers and returns a number.
+This is the idea of static typing in miniature: the type is known \emph{before} the value is computed. The checker does not run \rkt|(+ 3 4)| to find out it is a number; it knows because \code{+} takes numbers and returns a number.
 
 \subsection{Type Inference and Annotations}
 
@@ -54,7 +54,7 @@ An annotation is a claim the checker verifies, not a hint it trusts. This one is
 \end{lstlisting}
 Either way the program is checked before it runs: a call like \rkt|(add3-v3 "hello")| never gets the chance to fail at run time, because the whole file is rejected.
 
-If the checker can infer the types, why write them? Two reasons from lecture:
+If the checker can infer the types, why write them? There are two reasons:
 \begin{itemize}
   \item \textbf{Documentation.} The reader sees what the function takes and returns without reading its body.
   \item \textbf{Mental model.} Writing the type first makes you decide what the function is supposed to do before you write how it does it.

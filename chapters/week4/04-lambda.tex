@@ -3,7 +3,7 @@
 
 \subsection{Syntax}
 
-The last part of the lecture adds functions:
+This section adds functions to the language, through two new forms:
 \begin{center}
 \begin{tabular}{@{}lll@{}}
 \toprule
@@ -24,9 +24,9 @@ syntax & meaning & abstract syntax \\
   [lambdaC (x : symbol) (e : ArithE)]
   [appC (e1 : ArithE) (e2 : ArithE)])
 \end{lstlisting}
-\code{lambdaC} \emph{defines} a function and \code{appC} \emph{uses} one, much as \code{letC} introduces a name and \code{idC} uses it. Functions take one argument; several arguments can be simulated by currying (\Cref{sec:hof}).
+\code{lambdaC} \emph{defines} a function, and \code{appC} \emph{uses} one. The pair works much like \code{letC} and \code{idC}: one introduces a name, the other uses it. Every function takes exactly one argument. Several arguments can be simulated by currying (\Cref{sec:hof}).
 
-\subsubsection{Parsing} Any list whose head is not \code{+}, \code{*}, \code{let}, or \code{lambda} is an application:
+\subsubsection{Parsing} A list whose head is not \code{+}, \code{*}, \code{let}, or \code{lambda} is an application:
 \begin{lstlisting}
 (define (parse (s : s-expression)) : ArithE
   (cond
@@ -50,15 +50,15 @@ syntax & meaning & abstract syntax \\
 (parse '(f 5))
 ;; = (appC (idC 'f) (numC 5))
 \end{lstlisting}
-The outer \code{if} matters for calls whose head is itself a list, like \code{((lambda x (+ x 1)) 5)}: calling \code{s-exp->symbol} on it would fail with \code{s-exp->symbol: not a symbol}.
+The outer \code{if} handles calls whose head is itself a list, such as \code{((lambda x (+ x 1)) 5)}. Without it, \code{parse} would call \code{s-exp->symbol} on that list and fail with \code{s-exp->symbol: not a symbol}.
 
 \begin{remark}
-With an application fallback, \code{'(- 1 2)} no longer fails to parse. The \code{else} branch reads it as a call of a function named \code{-}, giving \rkt|(appC (idC '-) (numC 1))| and silently dropping the \code{2}. Before \code{lambda} was added, it was \code{case: no matching clause}.
+Because applications are the fallback, \code{'(- 1 2)} no longer fails to parse. The \code{else} branch reads it as a call of a function named \code{-}. The result is \rkt|(appC (idC '-) (numC 1))|, and the \code{2} is silently dropped. Before \code{lambda} was added, the same input failed with \code{case: no matching clause}.
 \end{remark}
 
 \subsection{\texttt{lambda} in Substitution}
 
-A \code{lambda} binds its parameter in its body, exactly as \code{let} binds \code{x} in \code{e2}. So the \code{lambdaC} case of each substitution function is its \code{letC} case without an \code{e1}: stop at shadowing, and in \code{subst-lazy-v2} rename with \code{gensym} first. The application case just recurses.
+A \code{lambda} binds its parameter in its body, exactly as \code{let} binds \code{x} in \code{e2}. So the \code{lambdaC} case of each substitution function is its \code{letC} case without an \code{e1}. It stops at shadowing, and in \code{subst-lazy-v2} it first renames the parameter with \code{gensym}. The application case simply recurses.
 \begin{lstlisting}
 ;; in subst-eager (subst-lazy is the same with subst-lazy)
 [lambdaC (y e)
@@ -75,18 +75,18 @@ A \code{lambda} binds its parameter in its body, exactly as \code{let} binds \co
 \end{lstlisting}
 
 \begin{pitfall}[The pattern variable shadows the argument]
-In \rkt|[lambdaC (y e) ...]|, the pattern variable \code{e} (the body) shadows \code{subst}'s own argument \code{e} (the whole \code{lambda}). So the shadowing branch must rebuild \rkt|(lambdaC y e)|; returning plain \code{e} would drop the \code{lambda} and return only its body. Shadowing bites the interpreter's author too.
+In \rkt|[lambdaC (y e) ...]|, the pattern variable \code{e} is the body. It shadows \code{subst}'s own argument \code{e}, which is the whole \code{lambda}. So the shadowing branch must rebuild \rkt|(lambdaC y e)|. Returning plain \code{e} would drop the \code{lambda} and return only its body. Shadowing bites the interpreter's author too.
 \end{pitfall}
 
 \subsection{A New Result Type}
 
-A program can now produce a function, for example \code{(lambda x (+ x 1))} or \code{(let f (lambda x x) f)}, and a function is not a number. So evaluation returns a \tyname{Value}, which is either:
+A program can now produce a function, for example \code{(lambda x (+ x 1))} or \code{(let f (lambda x x) f)}. A function is not a number, so evaluation must return a more general type. That type is \tyname{Value}, which is one of two things:
 \begin{lstlisting}
 (define-type Value
   [numV (n : number)]
   [funV (x : symbol) (e : ArithE)])
 \end{lstlisting}
-\code{+} and \code{*} only make sense on numbers, so they unwrap \code{numV} first and complain about anything else:
+\code{+} and \code{*} only make sense on numbers. So they first check that both operands are \code{numV}s, unwrap them, and report an error for anything else:
 \begin{lstlisting}
 (define (num+ (v1 : Value) (v2 : Value)) : Value
   (if (and (numV? v1) (numV? v2))
@@ -98,14 +98,14 @@ A program can now produce a function, for example \code{(lambda x (+ x 1))} or \
       (numV (* (numV-n v1) (numV-n v2)))
       (error 'eval "not a number")))
 \end{lstlisting}
-This is the first \emph{dynamic} type error in our language: whether \code{(+ e1 e2)} is meaningful depends on what \code{e1} and \code{e2} evaluate to, which the interpreter only learns at run time.
+This is the first \emph{dynamic} type error in our language. Whether \code{(+ e1 e2)} makes sense depends on what \code{e1} and \code{e2} evaluate to, and the interpreter only learns that at run time.
 
 \subsection{Eager Application}
 \label{sec:eagerapp}
 
-The lecture first adds functions to the \emph{eager} interpreter (\code{lec4b.rkt}, \code{lec4c.rkt}). Application is \emph{call-by-value}: evaluate the function, evaluate the argument, then substitute the argument's \emph{value} into the body. \code{let} works the same way.
+We first add functions to the \emph{eager} interpreter. Here application is \emph{call-by-value}: evaluate the function, evaluate the argument, and then substitute the argument's \emph{value} into the body. \code{let} works the same way.
 
-\code{subst-eager} substitutes only numbers, but a value may now be a function. So the value is turned back into an expression, and substituted with the expression-substituting \code{subst-lazy} or \code{subst-lazy-v2}. The expression they receive is already evaluated, so nothing is lazy about it:
+There is one obstacle. \code{subst-eager} can only substitute numbers, but a value may now be a function. So the interpreter turns the value back into an expression, and substitutes it with \code{subst-lazy} or \code{subst-lazy-v2}, which substitute expressions. Nothing about this is lazy, because the expression they receive has already been evaluated:
 \begin{lstlisting}
 (define (value->expr (v : Value)) : ArithE
   (type-case Value v
@@ -127,7 +127,9 @@ The lecture first adds functions to the \emph{eager} interpreter (\code{lec4b.rk
                   (eval-eager-v2 (subst-lazy (value->expr (eval-eager-v2 e2)) x e))]
             [numV (n) (error 'eval "not a function")])]))
 \end{lstlisting}
-The lecture's \code{lec4b.rkt} writes this with \code{Expr} for \tyname{ArithE} and \code{lambdaV} for \code{funV}, and gives \code{subst} a \tyname{Value} that it converts at the \code{idC} case; the effect is the same. Functions can now be passed around:
+The accompanying code, \code{lec4d.rkt}, uses different names: it writes \code{Expr} for \tyname{ArithE} and \code{lambdaV} for \code{funV}. It also passes \code{subst} a \tyname{Value} and converts it at the \code{idC} case. The effect is the same.
+
+With this, functions can be passed around:
 \begin{lstlisting}[style=repl]
 (let do-twice (lambda f (f (f 1)))
   (let double (lambda x (* 2 x))
@@ -137,7 +139,7 @@ The lecture's \code{lec4b.rkt} writes this with \code{Expr} for \tyname{ArithE} 
 ---> 4
 \end{lstlisting}
 
-\subsubsection{Eager capture} \Cref{sec:lazy} said that eager substitution cannot capture because a number has no names in it. A function value does have names, and its body may contain free variables:
+\subsubsection{Eager capture} \Cref{sec:lazy} argued that eager substitution cannot capture, because a number contains no names. A function value, however, does contain names, and its body may contain free variables:
 \begin{lstlisting}[style=repl]
 (let f (lambda x (+ x y))         y is free in f's body
   (let y 6
@@ -146,18 +148,18 @@ The lecture's \code{lec4b.rkt} writes this with \code{Expr} for \tyname{ArithE} 
 ---> ((lambda x (+ x 6)) 1)
 ---> 7
 \end{lstlisting}
-The right answer is an error: the \code{y} in \code{f} refers to no binding, and Racket rejects the same program with \code{y: unbound identifier}. \code{eval-eager-v2} returns 7 because \code{subst-lazy} carried the free \code{y} under \code{(let y 6 ...)}. Eager evaluation is not a defense against capture once values can contain code.
+The right answer is an error. The \code{y} in \code{f} refers to no binding, and Racket rejects the same program with \code{y: unbound identifier}. \code{eval-eager-v2} returns 7 because \code{subst-lazy} carried the free \code{y} under \code{(let y 6 ...)}. So once values can contain code, eager evaluation no longer protects against capture.
 
-The fix (\code{lec4c.rkt}) is the one from \Cref{sec:capavoid}: \code{eval-eager-v3} is \code{eval-eager-v2} with both calls to \code{subst-lazy} replaced by \code{subst-lazy-v2}. Now the program above raises \code{unbound variable}, and returning \code{f} instead of calling it shows the renaming:
+The fix is the same as in \Cref{sec:capavoid}. \code{eval-eager-v3} is \code{eval-eager-v2} with both calls to \code{subst-lazy} replaced by \code{subst-lazy-v2}. Now the program above raises \code{unbound variable}. Returning \code{f} instead of calling it shows the renaming:
 \begin{lstlisting}[style=repl]
 > (eval-eager-v3 (parse '(let f (lambda x (+ x y)) (let y 6 f))))
 (funV 'g3507 (plusC (idC 'g3507) (idC 'y)))
 \end{lstlisting}
-Substituting \code{f} into the body of \code{(let y 6 ...)} renamed \code{f}'s parameter to a fresh name, as the \code{lambdaC} case of \code{subst-lazy-v2} always does; the free \code{y} stays free.
+When \code{f} was substituted into the body of \code{(let y 6 ...)}, its parameter was renamed to a fresh name. The \code{lambdaC} case of \code{subst-lazy-v2} always does this. The free \code{y} stays free.
 
 \subsection{Lazy Application: \texttt{eval-lazy-v2}}
 
-The last version (\code{lec4d.rkt}) makes application lazy, like \code{let} in \Cref{sec:lazy}: the argument is substituted unevaluated.
+The last version makes application lazy, just like \code{let} in \Cref{sec:lazy}. The argument is substituted without being evaluated.
 
 \begin{lstlisting}
 (define (eval-lazy-v2 (e : ArithE)) : Value
@@ -174,8 +176,8 @@ The last version (\code{lec4d.rkt}) makes application lazy, like \code{let} in \
             [numV (n) (error 'eval "not a function")])]))
 \end{lstlisting}
 \begin{itemize}
-  \item \textbf{\code{lambdaC}}: a \code{lambda} is already a value. There is nothing to compute until it is called.
-  \item \textbf{\code{appC}}: evaluate \code{e1}; it must be a function \rkt|(funV x e)|. Then call it the way \code{let} works: substitute the argument \code{e2} for \code{x} in the body \code{e}, and evaluate the result. \code{e2} is substituted unevaluated, because this is the lazy version.
+  \item \textbf{\code{lambdaC}}: a \code{lambda} is already a value. Nothing needs to be computed until it is called.
+  \item \textbf{\code{appC}}: first evaluate \code{e1}, which must give a function \rkt|(funV x e)|. Then call it the way \code{let} works: substitute the argument \code{e2} for \code{x} in the body \code{e}, and evaluate the result. Since this is the lazy version, \code{e2} is substituted unevaluated.
 \end{itemize}
 \begin{lstlisting}[style=repl]
 ((lambda x (+ x 1)) 5)
@@ -184,7 +186,7 @@ The last version (\code{lec4d.rkt}) makes application lazy, like \code{let} in \
 \end{lstlisting}
 
 \begin{keypoint}[\code{let} is application]
-\code{((lambda x e) e2)} means the same as \code{(let x e2 e)}. What \code{lambda} adds is that the function is a \emph{value}: it can be named with \code{let}, passed as an argument, and returned as a result.
+\code{((lambda x e) e2)} means the same as \code{(let x e2 e)}. What \code{lambda} adds is that the function is a \emph{value}. It can be named with \code{let}, passed as an argument, and returned as a result.
 \end{keypoint}
 
 \begin{center}
@@ -211,7 +213,7 @@ With functions, capture-avoiding substitution matters even more. A function can 
 subst-lazy:     (lambda y (+ y y)),  then 2 ---> 4          captured!
 subst-lazy-v2:  (lambda g (+ y g)),  then 2 ---> (+ y 2) ---> unbound variable
 \end{lstlisting}
-\code{eval-eager} and \code{eval-lazy} still return a \code{number}, and \code{subst-eager} can substitute only numbers, so their \code{lambdaC} and \code{appC} cases remain errors (\code{"TODO: lambda"}); \code{eval-eager-v2}/\code{v3} and \code{eval-lazy-v2} are the versions with functions.
+The earlier interpreters \code{eval-eager} and \code{eval-lazy} still return a \code{number}, and \code{subst-eager} can only substitute numbers. So their \code{lambdaC} and \code{appC} cases remain errors (\code{"TODO: lambda"}). The versions that support functions are \code{eval-eager-v2}/\code{v3} and \code{eval-lazy-v2}.
 
 \begin{center}
 \begin{tabular}{@{}lll@{}}
@@ -224,4 +226,4 @@ the \code{f}/\code{y} example of \Cref{sec:eagerapp} & \code{unbound variable} &
 \bottomrule
 \end{tabular}
 \end{center}
-With capture-avoiding substitution, the two strategies differ only where an argument is never used, as for \code{let} in \Cref{sec:lazy}. Racket, like most languages, is call-by-value.
+With capture-avoiding substitution, the two strategies differ only when an argument is never used, just as for \code{let} in \Cref{sec:lazy}. Racket, like most languages, is call-by-value.

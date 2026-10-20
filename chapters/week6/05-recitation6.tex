@@ -1,4 +1,629 @@
-\section{Recitation 6}
+\section{Recitation 6: Mutable State and Tables}
 \label{sec:rec6}
 
-To be written after Recitation~6 (October 16, 2026), from the handout and the posted solutions.
+This section reviews the store-passing design, makes evaluation order visible, and then adds a new kind of value, an immutable \emph{table} (key-value map), to see which things a store makes changeable and which it does not. It ends with a rewrite of part of the interpreter in which the store-passing is done by two helper functions.
+
+\subsection{The Language}
+
+The language has numbers, \code{+}, \code{*}, \code{let}, \code{lambda}, application, boxes, \code{begin}, and mutable variables with \code{set!}, plus four forms for tables:
+\begin{lstlisting}[style=repl]
+(make-table (k1 e1) (k2 e2) ...)   a new table mapping each key ki to the value of ei
+(get-table t k)                    the value for key k in table t
+(set-table t k v)                  a NEW table: like t, but with k mapped to v
+(remove-table t k)                 a NEW table: like t, but without k
+\end{lstlisting}
+Two design decisions are fixed:
+\begin{itemize}
+  \item \textbf{Keys are symbols written in the program}, like field names, not expressions. \code{(get-table t (+ 1 2))} is not allowed; the key is known when the program is parsed.
+  \item \textbf{Tables never change.} \code{set-table} and \code{remove-table} leave \code{t} alone and return a new table, like Racket's \code{hash-set} and \code{hash-remove}. Most of \Cref{sec:rec6-vs} follows from this.
+\end{itemize}
+\begin{lstlisting}
+(define-type Entry
+  [entry (k : symbol) (e : Expr)])
+
+(define-type Expr
+  [numC (n : number)]
+  [plusC (e1 : Expr) (e2 : Expr)]
+  [timesC (e1 : Expr) (e2 : Expr)]
+  [letC (x : symbol) (e1 : Expr) (e2 : Expr)]
+  [lambdaC (x : symbol) (e : Expr)]
+  [appC (e1 : Expr) (e2 : Expr)]
+  [idC (x : symbol)]
+  [boxC (e : Expr)]
+  [unboxC (e : Expr)]
+  [setboxC (e1 : Expr) (e2 : Expr)]
+  [setC (x : symbol) (e2 : Expr)]
+  [seqC (e1 : Expr) (e2 : Expr)]
+  [maketableC (entries : (listof Entry))]
+  [gettableC (tbl : Expr) (k : symbol)]
+  [settableC (tbl : Expr) (k : symbol) (val : Expr)]
+  [removetableC (tbl : Expr) (k : symbol)])
+
+(define-type-alias Table (hashof symbol Value))
+
+(define-type Value
+  [numV (n : number)]
+  [closV (env : Env) (x : symbol) (e : Expr)]
+  [boxV (l : Location)]
+  [tableV (t : Table)])
+\end{lstlisting}
+Compare the two new kinds of value. A \code{boxV} holds a \emph{location}: the contents live in the store, so they can change while the \code{boxV} itself stays the same. A \code{tableV} holds the whole \tyname{Table} directly. There is nothing in it that points into the store, so a table value, once made, is fixed.
+
+\tyname{Entry} is a separate type for the same reason as \tyname{PatternE} in \Cref{sec:rec4}: one \code{(k e)} pair carries a symbol and an expression, and a \code{maketableC} has a list of them.
+\begin{lstlisting}
+(define (parse-entry (s : s-expression)) : Entry
+  (let ([l (s-exp->list s)])
+    (entry (s-exp->symbol (first l)) (parse (second l)))))
+\end{lstlisting}
+\code{parse} gets one line per new form:
+\begin{lstlisting}
+            [(set!) (setC (s-exp->symbol (second l)) (parse (third l)))]
+            [(make-table) (maketableC (map parse-entry (rest l)))]
+            [(get-table) (gettableC (parse (second l)) (s-exp->symbol (third l)))]
+            [(set-table) (settableC (parse (second l)) (s-exp->symbol (third l))
+                                    (parse (fourth l)))]
+            [(remove-table) (removetableC (parse (second l)) (s-exp->symbol (third l)))]
+\end{lstlisting}
+The keys go through \code{s-exp->symbol}, not \code{parse}: that is where ``keys are not expressions'' is enforced. The two \code{else} branches of \code{parse} send everything that is not a keyword to application, whether the head is a variable like \code{(f 10)} or an expression like \code{((get-table t inc) 41)}.
+
+\subsection{Environments and the Store}
+
+With \code{set!}, the meaning of a name is split over two maps:
+\begin{lstlisting}[style=repl]
+env   : symbol   -> Location      (fixed when the binding is made)
+store : Location -> Value         (can be overridden later)
+\end{lstlisting}
+The store, \code{fetch}, \tyname{Result}, and \code{new-loc} are those of \Cref{sec:storepass}. What changes is the environment: a binding now holds a location, and \code{lookup} returns it.
+\begin{lstlisting}
+(define-type Binding
+  [bind (name : symbol) (loc : Location)])
+(define-type-alias Env (listof Binding))
+
+(define (lookup (x : symbol) (env : Env)) : Location
+  (cond
+    [(cons? env)
+     (if (equal? (bind-name (first env)) x)
+         (bind-loc (first env))
+         (lookup x (rest env)))]
+    [else (error 'lookup "No binding found")]))
+\end{lstlisting}
+In \code{eval-env}, the cases for numbers, \code{lambda}, \code{+}, \code{*}, \code{let}, \code{begin}, \code{box}, and \code{unbox} are as in \Cref{sec:storepass,sec:storeboxes}. These four differ:
+\begin{lstlisting}
+    [appC (e1 e2)
+          (type-case Result (eval-env env sto e1)
+            [res (v1 sto-1)
+                 (type-case Result (eval-env env sto-1 e2)
+                   [res (v2 sto-2)
+                        (let ([l (new-loc)])
+                          (eval-env
+                           (extend-env (bind (closV-x v1) l) (closV-env v1))
+                           (override-store (cell l v2) sto-2)
+                           (closV-e v1)))])])]
+    [setC (x e)
+          (type-case Result (eval-env env sto e)
+            [res (v sto-1)
+                 (let [(l (lookup x env))]
+                   (res v (override-store (cell l v) sto-1)))])]
+    [idC (x) (res (fetch (lookup x env) sto) sto)]
+    [setboxC (e1 e2)
+             (type-case Result (eval-env env sto e1)
+               [res (v1 sto-1)
+                    (type-case Result (eval-env env sto-1 e2)
+                      [res (v2 sto-2)
+                           (res v2 (override-store (cell (boxV-l v1) v2) sto-2))])])]
+\end{lstlisting}
+What to notice:
+\begin{itemize}
+  \item \textbf{Every application allocates.} \code{appC} gets a fresh location for the parameter and stores the argument there, and \code{letC} is application in disguise. So every variable has its own cell, and that is what lets \code{set!} work.
+  \item \textbf{\code{set!} and \code{set-box!} both override a cell}, but they find it differently. \code{setC} looks the \emph{name} up in the environment; \code{setboxC} takes the location out of the \emph{value} it evaluated. \code{set!} can only reach the variable it names; a box can be passed around, and whoever holds it can change it.
+  \item \textbf{\code{set-box!} returns the new contents} \code{v2} here, where the interpreter of \Cref{sec:storeboxes} returns the box \code{v1}. Of the examples below, only \code{ex2} sees the difference.
+  \item \textbf{The store is threaded, never shared.} Each case passes the store that the previous subexpression returned to the next one. Which subexpression goes first is a choice the interpreter makes (\Cref{sec:rec6-order}).
+\end{itemize}
+\begin{lstlisting}
+(define (eval (e : Expr)) : Result
+  (eval-env empty-env empty-store e))
+
+(define (run (s : s-expression)) : Value
+  (res-v (eval (parse s))))
+\end{lstlisting}
+
+\subsection{Warm-up}
+
+\begin{exercise}[The examples of \Cref{sec:stateboxes}, and \code{set!}]
+Predict the value of each program before running it.
+\begin{lstlisting}
+(define ex0 '(let v (+ 1 1) (+ v v)))
+(define ex1 '(begin (+ 1 1) (+ 2 2)))
+(define ex2 '(let b (box 0) (set-box! b 1)))
+(define ex3 '(let b (box 0) (unbox b)))
+(define ex4 '(let b (box 0) (begin (begin (set-box! b 1)
+                                         (set-box! b (+ 1 (unbox b))))
+                                  (unbox b))))
+(define ex5 '(let a (box 1)
+               (let f (lambda x (+ x (unbox a)))
+                 (begin
+                   (set-box! a 2)
+                   (f 10)))))
+(define ex6 '(let v (+ 1 1) (begin (set! v 3) (+ v v))))
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+\begin{lstlisting}
+(test (run ex0) (numV 4))
+(test (run ex1) (numV 4))
+(test (run ex2) (numV 1))
+(test (run ex3) (numV 0))
+(test (run ex4) (numV 2))
+(test (run ex5) (numV 12))
+(test (run ex6) (numV 6))
+\end{lstlisting}
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+ex & result & why \\
+\midrule
+ex1 & 4 & \code{begin} throws away the first value \\
+ex2 & 1 & \code{set-box!} returns the new contents (\code{v2}) \\
+ex4 & 2 & the second \code{set-box!} reads the store the first one returned \\
+ex5 & 12 & \code{f} reads the box when it is \emph{called}: $10 + 2$ \\
+ex6 & 6 & \code{set!} overrides \code{v}'s cell, then $3 + 3$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+\code{ex5} is the one to understand. The closure for \code{f} captures the environment, which maps \code{a} to a location. The closure does not capture the store. By the time \code{(f 10)} runs, the store says that \code{a}'s box holds 2.
+\end{solution}
+
+\subsection{Evaluation Order}
+\label{sec:rec6-order}
+
+Our interpreter evaluates \code{e1} before \code{e2} in \code{(+ e1 e2)}, because it has to pick one to receive the store first. With side effects, the choice is visible:
+\begin{lstlisting}
+(define ex-order
+  '(let b (box 10)
+     (+ (begin (set-box! b 5) 4)
+        (unbox b))))
+
+(test (run ex-order) (numV 9))
+\end{lstlisting}
+\begin{lstlisting}[style=repl]
+left to right:  (begin (set-box! b 5) 4) runs first, so (unbox b) sees 5:   4 + 5  = 9
+right to left:  (unbox b) runs first and sees 10:                           4 + 10 = 14
+\end{lstlisting}
+Real languages make different choices. The same program can be written in C, Racket, and OCaml: \code{first()} adds 1 to a global counter, \code{second()} adds 10, and each prints the counter. Both are called once as the arguments of a function and once as the operands of \code{+}. The C version:
+\begin{lstlisting}[language=C]
+#include <stdio.h>
+
+int count = 0;
+
+__attribute__((noinline))
+int first(void) {
+    count += 1;
+    printf("[first]  count = %d\n", count);
+    return 10;
+}
+
+__attribute__((noinline))
+int second(void) {
+    count += 10;
+    printf("[second] count = %d\n", count);
+    return 20;
+}
+
+__attribute__((noinline))
+void print_sum(int a, int b) {
+    printf("Result of a + b: %d\n", a + b);
+}
+
+int main(void) {
+    printf("Demonstration 1: Function Argument Evaluation Order\n");
+    print_sum(first(), second());
+
+    count = 0; // reset count
+
+    printf("Demonstration 2: Expression Operand Evaluation Order\n");
+    int total = first() + second();
+    printf("Total: %d\n", total);
+
+    return 0;
+}
+\end{lstlisting}
+Compiled with Apple clang 21, at \code{-O0} and \code{-O2}, it prints:
+\begin{lstlisting}[style=repl]
+Demonstration 1: Function Argument Evaluation Order
+[first]  count = 1
+[second] count = 11
+Result of a + b: 30
+Demonstration 2: Expression Operand Evaluation Order
+[first]  count = 1
+[second] count = 11
+Total: 30
+\end{lstlisting}
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+language & order & guaranteed? \\
+\midrule
+Racket & left to right & yes, by the language definition \\
+C & Apple clang 21, \code{-O0} and \code{-O2}: left to right & no: unspecified \\
+OCaml & right to left in practice & no: unspecified \\
+\bottomrule
+\end{tabular}
+\end{center}
+In C the order is ``arbitrary'': the standard leaves it unspecified for both arguments and operands, so another compiler (GCC on x86 is the usual example) may print \code{[second]} first. The sum is 30 either way. Only the trace, and anything else the calls do to \code{count}, depends on the order. (The Racket version never resets \code{count}, so its second demonstration prints 12 and 22 instead of 1 and 11; the order is the same.) The OCaml version is named for OCaml's usual right-to-left order; it was not run here.
+
+The lesson for interpreters: the language designer \emph{chooses} the order, and in a store-passing interpreter the choice is written down explicitly by which \code{eval-env} call gets \code{sto} and which gets \code{sto-1}. In \Cref{sec:rec6-vs}, \code{ex-f} checks the order for \code{set-table}.
+
+\subsection{Table Helpers}
+
+A \tyname{Table} is a Racket hash. The four operations we need:
+\begin{lstlisting}[style=repl]
+(hash empty)       an empty hash
+(hash-ref t k)     (some v) if k maps to v in t, (none) otherwise
+(hash-set t k v)   a new hash: like t, but with k mapped to v
+(hash-remove t k)  a new hash: like t, but without k
+\end{lstlisting}
+
+\begin{exercise}[\code{expect-table}]
+Write \code{(expect-table v)}, which returns the table inside \code{v}, or signals the error \code{"expected a table"} if \code{v} is not a table. Hint: \code{type-case} can have an \code{else} case, for ``every other kind of value''.
+\end{exercise}
+\begin{solution}
+\begin{lstlisting}
+(define (expect-table (v : Value)) : Table
+  (type-case Value v
+    [tableV (t) t]
+    [else (error 'expect-table "expected a table")]))
+\end{lstlisting}
+\code{eval-env} gets back a \tyname{Value}, and only a \code{tableV} can be used as a table. Instead of repeating that check in three cases, it gets its own helper. Without it we would write \code{(tableV-t v)}, and a non-table would fail with a message about the accessor instead of about the program.
+\end{solution}
+
+\begin{exercise}[\code{make-table}]
+Write \code{(make-table env sto entries acc)}, which evaluates each entry's expression, left to right, passing the store along, and adds each key and its value to \code{acc}. It returns the finished table, along with the final store. If a key appears twice, the later entry wins. Hint: look at how the \code{plusC} case passes the store from \code{e1} to \code{e2}.
+\end{exercise}
+\begin{solution}
+This is the only helper that runs code. It is the \code{plusC} pattern stretched over a list, plus an accumulator for the table built so far:
+\begin{lstlisting}
+(define (make-table (env : Env) (sto : Store) (entries : (listof Entry)) (acc : Table))
+  : Result
+  (cond
+    [(empty? entries) (res (tableV acc) sto)]
+    [else
+     (type-case Entry (first entries)
+       [entry (k e)
+              (type-case Result (eval-env env sto e)
+                [res (v sto-1)
+                     (make-table env sto-1 (rest entries) (hash-set acc k v))])])]))
+\end{lstlisting}
+\begin{itemize}
+  \item The recursive call gets \code{sto-1}, not \code{sto}. Passing \code{sto} would quietly drop the first entry's side effects; the \code{set-box!} test in \Cref{sec:rec6-interp} catches that.
+  \item ``The later entry wins'' for a repeated key comes for free: \code{hash-set} on an existing key replaces it, and later entries are added later.
+  \item It returns a \tyname{Result}, not a \tyname{Table}, because the caller needs the final store too.
+\end{itemize}
+\end{solution}
+
+\begin{exercise}[\code{get-table}, \code{set-table}, \code{remove-table}]
+Write \code{(get-table t k)}, which returns the value for \code{k} in \code{t} or signals \code{(string-append "no such key: " (symbol->string k))}; \code{(set-table t k v)}, a new table with \code{k} mapped to \code{v}; and \code{(remove-table t k)}, a new table without \code{k}, which signals the same error as \code{get-table} if \code{t} has no key \code{k}. Hint: which helper already signals that error?
+\end{exercise}
+\begin{solution}
+These three are pure: no store, no evaluation, just hash operations. \code{hash-ref} returns an \code{optionof}, taken apart with \code{type-case} as in \Cref{sec:rec5}:
+\begin{lstlisting}
+(define (get-table (t : Table) (k : symbol)) : Value
+  (type-case (optionof Value) (hash-ref t k)
+    [some (v) v]
+    [none () (error 'get-table
+                    (string-append "no such key: " (symbol->string k)))]))
+
+(define (set-table (t : Table) (k : symbol) (v : Value)) : Table
+  (hash-set t k v))
+
+(define (remove-table (t : Table) (k : symbol)) : Table
+  (begin (get-table t k)
+         (hash-remove t k)))
+\end{lstlisting}
+\code{hash-remove} on a missing key silently returns the same hash, but \code{remove-table} must raise an error. \code{get-table} already signals it, so \code{remove-table} calls it only for its error and throws the value away with \code{begin}.
+\begin{lstlisting}
+(test (expect-table (tableV (hash empty))) (hash empty))
+(test/exn (expect-table (numV 1)) "expected a table")
+
+(define t-ab (hash (list (values 'a (numV 1)) (values 'b (numV 2)))))
+(test (get-table t-ab 'b) (numV 2))
+(test/exn (get-table t-ab 'c) "no such key: c")
+(test (get-table (set-table t-ab 'c (numV 3)) 'c) (numV 3))
+(test (get-table (set-table t-ab 'a (numV 3)) 'a) (numV 3))
+(test (get-table t-ab 'a) (numV 1))
+(test/exn (get-table (remove-table t-ab 'a) 'a) "no such key: a")
+(test/exn (remove-table t-ab 'c) "no such key: c")
+\end{lstlisting}
+The fifth test is the immutability promise at the Racket level: \code{set-table} made a new hash, and \code{t-ab} still maps \code{a} to 1.
+\end{solution}
+
+\subsection{Tables in the Interpreter}
+\label{sec:rec6-interp}
+
+\begin{exercise}[The four table cases]
+Fill in the four table cases of \code{eval-env}. \code{maketableC} uses \code{make-table}, starting from an empty hash. \code{gettableC}, \code{settableC}, and \code{removetableC} evaluate \code{tbl} and use \code{expect-table} on the result. In \code{settableC}, evaluate \code{tbl} \emph{before} \code{val}, and pass the store from one to the other.
+\end{exercise}
+\begin{solution}
+Each case evaluates its subexpressions while threading the store, then calls a helper:
+\begin{lstlisting}
+    [maketableC (entries) (make-table env sto entries (hash empty))]
+    [gettableC (tbl k)
+               (type-case Result (eval-env env sto tbl)
+                 [res (v sto-1) (res (get-table (expect-table v) k) sto-1)])]
+    [settableC (tbl k val)
+               (type-case Result (eval-env env sto tbl)
+                 [res (v1 sto-1)
+                      (let ([t (expect-table v1)])
+                        (type-case Result (eval-env env sto-1 val)
+                          [res (v2 sto-2) (res (tableV (set-table t k v2)) sto-2)]))])]
+    [removetableC (tbl k)
+                  (type-case Result (eval-env env sto tbl)
+                    [res (v sto-1) (res (tableV (remove-table (expect-table v) k)) sto-1)])]
+\end{lstlisting}
+\code{settableC} is the only case with two subexpressions, so it is the only one where order matters. It evaluates \code{tbl} first, then \code{val} in \code{sto-1}. Here \code{expect-table} is called \emph{before} \code{val} is evaluated, so \code{(set-table 5 a (set-box! b 1))} stops before \code{val} has changed the store. Checking after \code{val} would also pass every test below; the difference is only whether the side effects of \code{val} happen before the error.
+\end{solution}
+
+\begin{lstlisting}
+(test (run '(get-table (make-table (a 1) (b 2)) b)) (numV 2))
+(test (run '(get-table (make-table (a (+ 1 2))) a)) (numV 3))
+(test (run '(make-table)) (tableV (hash empty)))
+(test (run '(make-table (a 1) (b 2))) (tableV t-ab))
+(test (run '(get-table (make-table (a 1) (a 2)) a)) (numV 2))   ; the later entry wins
+(test/exn (run '(get-table (make-table (a 1)) b)) "no such key: b")
+
+(test (run '(get-table (set-table (make-table (a 1)) b 2) b)) (numV 2))
+(test (run '(get-table (set-table (make-table (a 1)) a 2) a)) (numV 2))
+(test/exn (run '(get-table (remove-table (make-table (a 1)) a) a)) "no such key: a")
+(test/exn (run '(remove-table (make-table (a 1)) b)) "no such key: b")
+\end{lstlisting}
+Entries are evaluated in the current environment, and can hold any value, here a table and a function:
+\begin{lstlisting}
+(test (run '(let y 5 (get-table (make-table (a y)) a))) (numV 5))
+(test (run '(get-table (get-table (make-table (inner (make-table (x 7)))) inner) x))
+      (numV 7))
+(test (run '(let t (make-table (inc (lambda x (+ x 1))))
+              ((get-table t inc) 41)))
+      (numV 42))
+\end{lstlisting}
+The \code{inc} test shows a table holding a closure, and why \code{parse}'s \code{else} branch must handle a non-symbol head: \code{((get-table t inc) 41)} is an application whose function part is a \code{get-table} expression. \code{make-table} passes the store from one entry to the next, so the second entry sees the first entry's \code{set-box!}; and using something that is not a table as a table is an error:
+\begin{lstlisting}
+(test (run '(let b (box 0)
+              (get-table (make-table (x (set-box! b 1)) (y (unbox b))) y)))
+      (numV 1))
+
+(test/exn (run '(get-table 5 a)) "expected a table")
+(test/exn (run '(set-table (box 1) a 2)) "expected a table")
+(test/exn (run '(remove-table (lambda x x) a)) "expected a table")
+\end{lstlisting}
+
+\subsection{Tables vs.\ Boxes}
+\label{sec:rec6-vs}
+
+\begin{exercise}[What can change?]
+Predict what each program evaluates to before running it.
+\begin{lstlisting}
+;; a) set-table returns a new table. What happens to t?
+(define ex-a
+  '(let t (make-table (a 1))
+     (begin
+       (set-table t a 2)
+       (get-table t a))))
+
+;; b) This time we use the table that set-table returns.
+(define ex-b
+  '(let t (make-table (a 1))
+     (get-table (set-table t a 2) a)))
+
+;; c) set! can change what the *variable* t refers to.
+(define ex-c
+  '(let t (make-table (a 1))
+     (begin
+       (set! t (set-table t a 2))
+       (get-table t a))))
+
+;; d) Two variables, one table. Does u see the change?
+(define ex-d
+  '(let t (make-table (a 1))
+     (let u t
+       (begin
+         (set! t (set-table t a 2))
+         (get-table u a)))))
+
+;; e) A box inside a table.
+(define ex-e
+  '(let b (box 1)
+     (let t (make-table (a b))
+       (begin
+         (set-box! b 5)
+         (unbox (get-table t a))))))
+
+;; f) Which runs first: the table or the value?
+(define ex-f
+  '(let b (box 0)
+     (get-table (set-table (begin (set-box! b 1) (make-table))
+                           a
+                           (unbox b))
+                a)))
+\end{lstlisting}
+\end{exercise}
+\begin{solution}
+\begin{lstlisting}
+(test (run ex-a) (numV 1))
+(test (run ex-b) (numV 2))
+(test (run ex-c) (numV 2))
+(test (run ex-d) (numV 1))
+(test (run ex-e) (numV 5))
+(test (run ex-f) (numV 1))
+\end{lstlisting}
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+ex & result & why \\
+\midrule
+a & 1 & the new table is thrown away by \code{begin}; \code{t} never changed \\
+b & 2 & reads the new table directly \\
+c & 2 & \code{set!} puts the new table in \code{t}'s cell \\
+d & 1 & \code{u} has its own cell, holding the old table \\
+e & 5 & the table holds a \emph{box}; the box's contents changed \\
+f & 1 & the table expression runs first, so \code{(unbox b)} sees 1 \\
+\bottomrule
+\end{tabular}
+\end{center}
+The way to keep these straight is to ask, for each program, which of the two maps changes.
+\begin{lstlisting}[style=repl]
+ex-d, just before (get-table u a):
+
+  env:   t -> L0        u -> L1
+  store: L0 -> T2       (overridden by set!)
+         L1 -> T1       (copied from t when u was bound; set! never touched it)
+
+  T1 = {a: 1}    T2 = {a: 2}      two separate, unchanging tables
+\end{lstlisting}
+\begin{itemize}
+  \item \code{set!} changes the \emph{store}, at the one location its variable names. In \code{ex-c} that is the location we read from; in \code{ex-d} it is not. \code{(let u t ...)} copied the table \emph{value} into \code{u}'s new cell, and that value cannot change.
+  \item A table can still \emph{contain} something mutable. In \code{ex-e} the table maps \code{a} to \code{(boxV L)}, and that does not change. What changes is the contents of \code{L} in the store, which is exactly what \code{unbox} reads.
+  \item \code{ex-f} is the evaluation-order test of \Cref{sec:rec6-order}, for \code{settableC}. Right to left would give 0.
+\end{itemize}
+\end{solution}
+
+\begin{exercise}[Tables of locations]
+Another design: a table maps each key to a \emph{location} in the store, and the store holds the value. Would that change any of the answers above? When would it matter?
+\end{exercise}
+\begin{solution}
+It depends on what \code{set-table} does with that design.
+\begin{itemize}
+  \item If \code{set-table} \emph{allocates a fresh location} for \code{k} and copies the other key-to-location pairs, nothing ever writes to an existing table's cell, so all six answers stay the same. The difference is hidden sharing: the old and new tables now point to the \emph{same} cells for every other key. As soon as we add an operation that writes to a key's cell (an in-place \code{update-table!}), a write through one table shows up in the other.
+  \item If \code{set-table} \emph{overrides the existing location} for a key that is already present, that is in-place mutation, the case of the next exercise.
+\end{itemize}
+\end{solution}
+
+\begin{exercise}[Mutable tables]
+Which of \code{ex-a} to \code{ex-f} would change if tables could be changed in place, like Racket's mutable hash tables or JavaScript objects?
+\end{exercise}
+\begin{solution}
+\code{ex-a} and \code{ex-d}. In place, \code{set-table} changes the one table that both the old and new names refer to:
+\begin{center}
+\begin{tabular}{@{}llll@{}}
+\toprule
+ex & immutable & in place & why it changes \\
+\midrule
+a & 1 & 2 & the ``thrown away'' result was \code{t} itself \\
+d & 1 & 2 & \code{t} and \code{u} alias one table \\
+b, c, e, f & same & same & they read the result, or never use \code{set-table} on a shared table \\
+\bottomrule
+\end{tabular}
+\end{center}
+\code{ex-d} is the aliasing problem in its usual form. In JavaScript, \code{let u = t; t.a = 2; u.a} gives 2. With immutable tables a copy and a reference behave the same, so aliasing cannot be observed. The table above can be checked by changing \tyname{Table} to a mutable hash (\code{make-hash}, and \code{hash-set!} in \code{make-table} and \code{set-table}).
+\end{solution}
+
+\subsection{Challenge: Passing the Store with Monads}
+
+Every multi-subexpression case above has the same shape: evaluate, take the result apart with \code{type-case Result}, pass the new store on, and repeat. That shape can be factored out into two functions, \code{mret} and \code{mbind}. With \tyname{Result} fixed to hold a \tyname{Value}:
+\begin{lstlisting}
+;; A Stateful is a computation that needs a store to run, and gives back a Result.
+(define-type-alias Stateful (Store -> Result))
+
+;; A computation that just returns v, without touching the store.
+(define (mret (v : Value)) : Stateful
+  (lambda (sto) (res v sto)))
+
+;; Run m, then pass its value to f, and run the computation f returns,
+;; using the store m returned.
+(define (mbind (m : Stateful) (f : (Value -> Stateful))) : Stateful
+  (lambda (sto)
+    (type-case Result (m sto)
+      [res (v sto-1) ((f v) sto-1)])))
+
+;; eval-env isn't written this way, but a call to it can be turned into a Stateful.
+(define (meval (env : Env) (e : Expr)) : Stateful
+  (lambda (sto) (eval-env env sto e)))
+\end{lstlisting}
+A \tyname{Stateful} is a computation that has not run yet: give it a store and it gives back a \tyname{Result}. \code{mbind} is the only place \code{sto-1} appears. It runs \code{m}, hands the value to \code{f}, and runs whatever \code{f} returns \emph{in the store \code{m} left behind}. Threading the store correctly is now \code{mbind}'s job, not each case's.
+
+\begin{exercise}[\code{make-table/m}]
+Rewrite \code{make-table} using \code{mret}, \code{mbind}, and \code{meval}: no \code{sto}, and no \code{type-case Result}.
+\end{exercise}
+\begin{solution}
+\begin{lstlisting}
+(define (make-table/m (env : Env) (entries : (listof Entry)) (acc : Table)) : Stateful
+  (cond
+    [(empty? entries) (mret (tableV acc))]
+    [else
+     (type-case Entry (first entries)
+       [entry (k e)
+              (mbind (meval env e)
+                     (lambda (v)
+                       (make-table/m env (rest entries) (hash-set acc k v))))])]))
+\end{lstlisting}
+Put it next to \code{make-table}: \code{(res (tableV acc) sto)} became \code{(mret (tableV acc))}, and the \code{type-case Result} plus explicit \code{sto-1} became one \code{mbind}. The parameter \code{sto} is gone: \code{make-table/m} returns a computation, and whoever runs it supplies the store.
+\end{solution}
+
+\begin{exercise}[\code{set-table/m}]
+Rewrite the \code{settableC} case of \code{eval-env} the same way, as \code{(set-table/m env tbl k val)}.
+\end{exercise}
+\begin{solution}
+\begin{lstlisting}
+(define (set-table/m (env : Env) (tbl : Expr) (k : symbol) (val : Expr)) : Stateful
+  (mbind (meval env tbl)
+         (lambda (tv)
+           (let ([t (expect-table tv)])
+             (mbind (meval env val)
+                    (lambda (v) (mret (tableV (set-table t k v)))))))))
+\end{lstlisting}
+The nesting of the \code{mbind}s \emph{is} the evaluation order: \code{tbl} is outermost, so it runs first. To evaluate right to left, swap the two \code{mbind}s; no store variable would need renaming.
+\end{solution}
+
+To test these we need an environment and a store to run them in. \code{env-b} and \code{sto-b} build by hand the state just after \code{(let b (box 0) ...)}: \code{b} lives at $-1$, and that cell holds a box pointing at $-2$, which holds 0. Negative locations cannot clash with the ones \code{new-loc} hands out.
+\begin{lstlisting}
+(define env-b (extend-env (bind 'b -1) empty-env))
+(define sto-b (override-store (cell -1 (boxV -2))
+                              (override-store (cell -2 (numV 0)) empty-store)))
+
+;; The second entry sees the first entry's set-box!.
+(test (get-table (expect-table
+                  (res-v ((make-table/m env-b
+                                        (list (entry 'x (parse '(set-box! b 1)))
+                                              (entry 'y (parse '(unbox b))))
+                                        (hash empty))
+                          sto-b)))
+                 'y)
+      (numV 1))
+
+;; set-table/m evaluates the table before the value, and returns the final store.
+(define set-table/m-result
+  ((set-table/m env-b
+                (parse '(begin (set-box! b 1) (make-table)))
+                'a
+                (parse '(unbox b)))
+   sto-b))
+(test (get-table (expect-table (res-v set-table/m-result)) 'a) (numV 1))
+(test (fetch -2 (res-s set-table/m-result)) (numV 1))
+\end{lstlisting}
+
+\begin{exercise}[Using them in \code{eval-env}]
+Use \code{make-table/m} and \code{set-table/m} in the \code{maketableC} and \code{settableC} cases of \code{eval-env}, and check that all the tests still pass.
+\end{exercise}
+\begin{solution}
+A \tyname{Stateful} becomes a \tyname{Result} by applying it to the current store, so the two cases become one line each:
+\begin{lstlisting}
+    [maketableC (entries) ((make-table/m env entries (hash empty)) sto)]
+    [settableC (tbl k val) ((set-table/m env tbl k val) sto)]
+\end{lstlisting}
+All the table tests pass. One thing to watch: the tests that call \code{run} must come after the \code{define}s of \code{make-table/m} and \code{set-table/m}. Module-level code runs top to bottom, so an earlier test fails with ``cannot reference an identifier before its definition''.
+\end{solution}
+
+\subsection{Summary}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+idea & where it shows up \\
+\midrule
+env: name to location; store: location to value & \code{lookup} then \code{fetch} \\
+every binding gets a fresh cell & \code{appC} calls \code{new-loc}; \code{set!} needs it \\
+the store is threaded, so order is a choice & \code{ex-order}, \code{ex-f}, the C program \\
+tables are values, boxes are references & \code{ex-a} to \code{ex-e} \\
+mutable vs.\ immutable is about aliasing & \code{ex-a} and \code{ex-d} flip with in-place tables \\
+\code{mret}/\code{mbind} hide the store-passing & \code{make-table/m}, \code{set-table/m} \\
+\bottomrule
+\end{tabular}
+\end{center}

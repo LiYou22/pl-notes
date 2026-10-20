@@ -10,7 +10,7 @@ Supplementary reading:
   \item \cite{TAPL} Chapter 1 (what type systems are for), optional.
 \end{itemize}
 
-From this week on, code is written in \code{\#lang plai-typed}, the language of the textbook: Racket with a type checker that reads the whole program before anything runs. Lecture~3 introduces its types, defines new types with \code{define-type}, and uses them to write the first interpreter of the course, a calculator. Recitation~3 redoes Recitation~2 with types and then studies Racket's \code{match} in more depth. This chapter covers:
+From this chapter on, code is written in \code{\#lang plai-typed}, the language of \cite{PLAI}: Racket with a type checker that reads the whole program before anything runs. We introduce its types, define new types with \code{define-type}, and use them to write a first interpreter for a language of our own, a calculator. The last section redoes the Boolean-expression interpreter of \Cref{sec:rec2} with types and then studies Racket's \code{match} in more depth. This chapter covers:
 \begin{itemize}
   \item \Cref{sec:types}: types, type inference and annotations, function types, homogeneous lists, pairs, and polymorphism;
   \item \Cref{sec:definetype}: \code{define-type}, \code{type-case}, and exhaustiveness checking;

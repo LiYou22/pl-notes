@@ -1,7 +1,7 @@
 \section{Lazy \texttt{let} and Dynamic Scope}
 \label{sec:dynscope}
 
-\code{lecture5b.rkt} and \code{lecture5c.rkt} make the environment interpreter \emph{lazy}, as \Cref{sec:lazy} did for substitution: \code{let} does not evaluate \code{e1}, but stores it and evaluates it only when \code{x} is used. The language is still that of \code{lecture5a.rkt}, numbers and \code{let}. The first attempt gets scope wrong; the second fixes it.
+Versions 5b and 5c make the environment interpreter \emph{lazy}, as \Cref{sec:lazy} did for substitution: \code{let} does not evaluate \code{e1}, but stores it and evaluates it only when \code{x} is used. The language is still that of 5a, numbers and \code{let}. The first attempt gets scope wrong; the second fixes it.
 
 \subsection{Attempt 1: Store the Expression}
 
@@ -11,7 +11,7 @@ A binding now holds an unevaluated expression, and \code{lookup} returns it:
   [bind (name : symbol) (defn : Expr)])
 
 (define (lookup (x : symbol) (env : Env)) : Expr
-  ...)   ; as in lecture5a, returning (bind-defn (first env))
+  ...)   ; as in 5a, returning (bind-defn (first env))
 
 (define (eval-env1 (env : Env) (e : Expr)) : number
   (type-case Expr e
@@ -24,7 +24,7 @@ A binding now holds an unevaluated expression, and \code{lookup} returns it:
 (define (eval1 (e : Expr)) : number
   (eval-env1 empty-env e))
 \end{lstlisting}
-\code{letC} stores \code{e1} as is. \code{idC} looks up the stored expression and evaluates it, in \code{env}, the environment \emph{at the use}. The first examples work (``So far so good'', says the file):
+\code{letC} stores \code{e1} as is. \code{idC} looks up the stored expression and evaluates it, in \code{env}, the environment \emph{at the use}. The first examples work:
 \begin{lstlisting}[style=repl]
 > (eval1 (parse '(+ 27 (let x 5 (+ x x)))))
 37
@@ -33,7 +33,7 @@ A binding now holds an unevaluated expression, and \code{lookup} returns it:
 > (eval1 (parse '(let x 5 (let x 6 (+ x x)))))
 12
 \end{lstlisting}
-Then the lecture tries a program where the stored expression mentions a name that is rebound before the use:
+Now try a program where the stored expression mentions a name that is rebound before the use:
 \begin{lstlisting}[style=repl]
 (let x 1 (let y x (let x 2 (+ y y))))   env = []
   store x=1                             env = [x=1]
@@ -52,7 +52,7 @@ Then the lecture tries a program where the stored expression mentions a name tha
 > (eval1 (parse '(let x 1 (let y x (let z 2 (+ y y))))))
 2
 \end{lstlisting}
-It does change, so \code{eval-env1} is wrong. The file's last example is the counterpart of capture in \Cref{sec:lazy}:
+It does change, so \code{eval-env1} is wrong. The last example is the counterpart of capture in \Cref{sec:lazy}:
 \begin{lstlisting}[style=repl]
 > (eval1 (parse '(let x y (let y 2 (+ x x)))))
 4
@@ -85,7 +85,7 @@ The \code{y} in \code{(let x y ...)} is free, so this should be an error, but by
 \begin{definition}[Lexical and dynamic scope]
 Under \emph{lexical} (static) scope, the binding a name refers to is determined by the program text: the nearest enclosing binder of that name, which can be found without running the program. Under \emph{dynamic} scope, it is determined by the execution history: the most recent binding of that name that is still active when the name is evaluated.
 \end{definition}
-The file adds that this is ``slightly informal, we could give a more precise definition''; the binding arrows of \Cref{fig:dyn} are the informal picture.
+This definition is slightly informal; a more precise one could be given. The binding arrows of \Cref{fig:dyn} are the informal picture.
 
 Substitution always gives lexical scope: it replaces names inside the binder's body at the moment the binder is processed, so a name can only ever be replaced by its own binder. \code{eval-env1} gives dynamic scope, because it evaluates the stored expression in whatever environment exists when the name is used, and by then other bindings may have been added.
 
@@ -95,7 +95,7 @@ Under dynamic scope, renaming a local variable can change what \emph{other} code
 
 \subsection{Attempt 2: Store the Environment Too}
 
-\code{lecture5c.rkt} ``corrects the issue by saving the environment \emph{at the time of the let} inside of a binding'', and evaluates the stored expression in that environment:
+Version 5c corrects the issue by saving the environment \emph{at the time of the let} inside the binding, and evaluates the stored expression in that environment:
 \begin{lstlisting}
 (define-type Binding
   [bind (name : symbol) (env : Env) (defn : Expr)])

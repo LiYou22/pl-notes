@@ -10,6 +10,8 @@
 \RequirePackage{textcomp}
 \RequirePackage{microtype}
 \setlength{\emergencystretch}{2em}
+% Flush-left paragraphs; parskip separates them with vertical space instead
+\RequirePackage[skip=0.5\baselineskip plus 2pt]{parskip}
 
 % Math
 \RequirePackage{amsmath,amssymb,amsthm,mathtools}
@@ -67,11 +69,12 @@
   aboveskip=8pt,
   belowskip=8pt,
 }
-% Never break a listing across pages (9999 still loses to a short page).
-% A listing taller than a page would overflow; split it by hand.
-\makeatletter
-\lst@AddToHook{EveryPar}{\vadjust{\penalty\@M}}
-\makeatother
+% Never break a listing across pages, including between its frame rule and
+% its first line: box the whole thing, and keep it with the line before it. A listing taller than a page would
+% overflow; split it by hand.
+\RequirePackage{etoolbox}
+\BeforeBeginEnvironment{lstlisting}{\par\nopagebreak\noindent\begin{minipage}{\linewidth}}
+\AfterEndEnvironment{lstlisting}{\end{minipage}\par}
 % REPL transcripts and traces: no keyword highlighting
 \lstdefinestyle{repl}{language={}, basicstyle=\ttfamily\small, frame=leftline, framerule=1.2pt, rulecolor=\color{accent!50}}
 \newcommand{\rkt}{\lstinline[language=Racket,basicstyle=\ttfamily,keywordstyle={}]}
