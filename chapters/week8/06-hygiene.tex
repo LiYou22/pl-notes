@@ -1,0 +1,55 @@
+\section{Hygiene}
+\label{sec:hygiene}
+
+\subsection{The Problem: Capture}
+
+In lecture, \code{multi-or} of \Cref{sec:multior} was used under a binding of the user's own named \code{b}:
+\begin{lstlisting}
+(let ([b #t])
+  (multi-or #f b))
+\end{lstlisting}
+If expansion just pasted text, as the C preprocessor does (\Cref{sec:rec5}), the result would be the expansion written out in a comment in the lecture code:
+\begin{lstlisting}
+(let ([b #t])
+  (let ([b #f])                 ; b written in the template
+    (if b b (multi-or b))))     ; b written by the user
+\end{lstlisting}
+The user's \code{b}, which referred to the outer \code{\#t}, now sits inside the macro's \code{(let ([b \#f]) \dots)} and refers to \code{\#f}. The program answers \code{\#f} although one argument of the \code{or} is true. The user's variable has been \emph{captured} by a binding the user cannot see.
+
+\subsection{Hygienic Expansion}
+
+\begin{definition}[Hygienic macro system]
+A macro system is \emph{hygienic} if expansion preserves lexical scope: every name in the expanded program refers to the binding that was visible where the name was \emph{written}. A name written in a macro's template is resolved where the macro is defined; a name written by the user in an argument is resolved where the macro is used.
+\end{definition}
+
+Racket's expander is hygienic. It records, for every identifier, whether it came from the template or from the use, so the two \code{b}s above are different variables even though they print the same. The effect is as if the template's \code{b} had been renamed to a fresh name before pasting,
+\begin{lstlisting}
+(let ([b #t])
+  (let ([b1 #f])
+    (if b1 b1 (multi-or b))))
+\end{lstlisting}
+and the program answers \code{\#t}, which is what DrRacket printed in lecture.
+
+\subsection{Two Directions of Capture}
+
+Hygiene rules out capture in both directions.
+\begin{enumerate}
+  \item \emph{The macro captures the user's name.} A binding introduced by the template, like \code{b} above, must not capture a variable the user wrote in an argument.
+  \item \emph{The user captures the macro's name.} A free name in the template, like \code{if} or \code{let}, must not be captured by a binding at the use site. In
+\begin{lstlisting}
+(let ([if 42])
+  (multi-or #f 1))
+\end{lstlisting}
+  the user has rebound \code{if} locally, but the \code{if} in the template still means Racket's \code{if}, the one visible where \code{multi-or} was defined. The answer is \code{1}.
+\end{enumerate}
+The \code{loop} helper of \code{my-while} (\Cref{sec:mywhile}) is protected by the first rule: a user variable named \code{loop} in \code{test} or \code{body} is not the macro's \code{loop}.
+
+\subsection{Connections}
+
+\begin{keypoint}
+Hygiene is lexical scope for macros. A text macro resolves every name after pasting, at the use site, which is the macro analogue of dynamic scope (\Cref{sec:dynscope}), with the same symptom: renaming a variable changes what the program does. A hygienic expander avoids capture the way capture-avoiding substitution did in \Cref{sec:capavoid}, by giving the introduced names fresh identities.
+\end{keypoint}
+
+\begin{remark}
+DrRacket's \emph{Macro Stepper} shows each expansion step. On the example above, it displays the template's \code{b} and the user's \code{b} in different colors, which is a quick way to see which name refers to which binding.
+\end{remark}

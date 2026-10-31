@@ -1,0 +1,73 @@
+\section{A First Macro: \texttt{my-or}}
+\label{sec:myor}
+
+\Cref{sec:orfun} showed that \code{or} must rewrite the program before it runs. Racket lets us write such a rewrite ourselves, as a \emph{macro}:
+\begin{lstlisting}
+(define-syntax (my-or stx)
+  (syntax-case stx ()
+    [(my-or a b)
+     #'(if a #t b)]))
+\end{lstlisting}
+Piece by piece:
+\begin{itemize}
+  \item \code{define-syntax} binds \code{my-or} as a macro instead of a function. Whenever the expander meets a form \code{(my-or \dots)}, it calls the macro's \emph{transformer} on that form, before the program runs.
+  \item The transformer is a function. Its argument \code{stx} is a \emph{syntax object}: the program text of the whole use, such as \code{(my-or \#t (print "hello world"))}, together with information like source location and scope. It returns another syntax object, which replaces the use.
+  \item \code{syntax-case} takes \code{stx} apart by pattern matching. The \code{()} is the list of literals, keywords that must match exactly; there are none here. The pattern \code{(my-or a b)} matches a use with exactly two subforms and binds the \emph{pattern variables} \code{a} and \code{b} to them, unevaluated. The first position, \code{my-or}, is a pattern variable too: it matches the macro's name as written at the use, and is usually ignored (it is often written \code{\_}).
+  \item \code{\#'(if a \#t b)} is short for \code{(syntax (if a \#t b))}: a \emph{template}. It builds a syntax object in which every pattern variable is replaced by the piece of syntax it matched. \code{\#'} is to syntax objects what \code{'} is to lists.
+\end{itemize}
+
+So the use
+\begin{lstlisting}
+(my-or #t (print "hello world"))
+\end{lstlisting}
+is rewritten into
+\begin{lstlisting}
+(if #t #t (print "hello world"))
+\end{lstlisting}
+which is exactly the expression from \Cref{sec:orfun} that returns \code{\#t} without printing. The argument \code{(print "hello world")} is moved into a branch of the \code{if} as program text, never as a value, so it is evaluated only if that branch is taken.
+
+\begin{keypoint}
+A function maps values to a value at run time. A macro maps syntax to syntax at expansion time, before evaluation starts. This is the same desugaring we did inside the interpreter, \code{let} into an application of a \code{lambda} (\Cref{sec:substrev}) and \code{rec} into boxes (\Cref{sec:recboxes}), now done by the language for the programmer.
+\end{keypoint}
+
+\subsection{\texttt{my-if}}
+
+The same recipe gives a conditional of our own, written in terms of \code{cond}:
+\begin{lstlisting}
+(define-syntax (my-if stx)
+  (syntax-case stx ()
+    [(my-if a b c)
+     #'(cond [a b] [else c])]))
+\end{lstlisting}
+\code{(my-if e1 e2 e3)} expands to \code{(cond [e1 e2] [else e3])}, so only one of \code{e2} and \code{e3} is evaluated. As a function, \code{(define (my-if a b c) (cond [a b] [else c]))} would evaluate both branches before choosing one. Every effect in the branch not taken would happen anyway, and a recursive function whose base case is guarded by such an \code{if}, like
+\begin{lstlisting}
+(define (fact n)
+  (my-if (= n 0) 1 (* n (fact (- n 1)))))
+\end{lstlisting}
+would never terminate: the recursive call in the third argument is evaluated even when \code{n} is 0. With the macro, \code{fact} works, because the recursive call ends up in the \code{else} branch of the \code{cond}.
+
+\begin{remark}
+In the template, \code{else} is not a pattern variable: it is not in the pattern \code{(my-if a b c)}, so it is copied into the output as is, and \code{cond} sees it as its own \code{else} keyword. Only \code{a}, \code{b}, and \code{c} are replaced.
+\end{remark}
+
+\subsection{\texttt{define-syntax-rule}}
+
+When a macro has a single pattern, \code{define-syntax-rule} says the same thing more briefly:
+\begin{lstlisting}
+(define-syntax-rule (my-or2 a b)
+  (if a #t b))
+\end{lstlisting}
+The first part is the pattern and the second is the template. There is no \code{stx}, no \code{syntax-case}, and no \code{\#'}: the template is implicitly a \code{syntax} template. \code{my-or2} behaves exactly like \code{my-or}. The longer \code{syntax-case} form is needed when a macro has several patterns, or when its transformer must run code of its own before producing the output.
+
+\subsection{\texttt{unless}}
+
+\code{(unless b e)} evaluates \code{e} only when \code{b} is false. It is \code{if} with the branches swapped and nothing in the true branch:
+\begin{lstlisting}
+(define-syntax-rule (unless b e)
+  (if b (void) e))
+\end{lstlisting}
+\code{(void)} returns Racket's ``no useful value'' value, which the REPL does not print. As with \code{or} and \code{if}, \code{unless} must be a macro: as a function, \code{e} would be evaluated before the test, so \code{(unless \#t (print "hi"))} would print.
+
+\begin{remark}
+Racket already has an \code{unless}; a definition at the top of a module shadows the imported one. Racket's version also allows several body expressions, \code{(unless b e1 e2 \dots)}, which needs an ellipsis pattern, \code{(unless b e ...)}.
+\end{remark}

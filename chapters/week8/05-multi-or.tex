@@ -1,0 +1,57 @@
+\section{Any Number of Arguments: \texttt{multi-or}}
+\label{sec:multior}
+
+Racket's \code{or} takes any number of arguments. A macro accepts that with an \emph{ellipsis} pattern, and handles it by recursion on the number of arguments:
+\begin{lstlisting}
+(define-syntax (multi-or stx)
+  (syntax-case stx ()
+    [(multi-or e0 e1 ...)
+     #'(let ([b e0])
+         (if b b (multi-or e1 ...)))]
+    [(multi-or)
+     #'#f]))
+\end{lstlisting}
+
+\subsection{Ellipses}
+
+In a pattern, \code{e1 ...} matches zero or more subforms, and binds \code{e1} to the whole sequence. So \code{(multi-or e0 e1 ...)} matches any use with at least one argument: \code{e0} is the first, \code{e1} the rest. In a template, \code{e1 ...} puts that sequence back, in order. The second clause, \code{(multi-or)}, matches the use with no arguments, and its template \code{\#'\#f} is the answer of an empty \code{or}. \code{syntax-case} tries the clauses in order, and the two patterns do not overlap.
+
+\subsection{Recursion That Terminates}
+
+The template uses \code{multi-or} again, as \code{my-while} did in \Cref{sec:mywhile}, but here the recursive use has one argument fewer. Every expansion step removes one argument, so expansion reaches \code{(multi-or)} and stops. For example:
+\begin{lstlisting}
+(multi-or #f #f 3)
+---> (let ([b #f]) (if b b (multi-or #f 3)))
+---> (let ([b #f]) (if b b (let ([b #f]) (if b b (multi-or 3)))))
+---> ... (let ([b 3]) (if b b (multi-or))) ...
+---> ... (let ([b 3]) (if b b #f)) ...
+\end{lstlisting}
+The result is \code{3}. Like Racket's \code{or}, and unlike \code{my-or} of \Cref{sec:myor}, \code{multi-or} returns the first true value itself, not \code{\#t}.
+
+\subsection{Why the \texttt{let}}
+
+The lecture code also defines the version without the \code{let}, and calls it \code{multi-or-bad}:
+\begin{lstlisting}
+(define-syntax (multi-or-bad stx)
+  (syntax-case stx ()
+    [(multi-or-bad e0 e1 ...)
+     #'(if e0 e0 (multi-or-bad e1 ...))]
+    [(multi-or-bad)
+     #'#f]))
+\end{lstlisting}
+Its template copies \code{e0} twice, so \code{e0} is evaluated twice when it is true. With effects that is visible: \code{(multi-or-bad (begin (print "hi") 1))} prints \code{"hi"} twice, once for the test and once for the result. \code{multi-or} binds \code{e0} once to \code{b} and then tests and returns \code{b}, so it evaluates \code{e0} exactly once.
+
+The same issue arises in any macro that uses an argument twice. A \code{square} macro written as \code{(* x x)} would evaluate its argument twice, so it binds it first:
+\begin{lstlisting}
+(define-syntax-rule (square x)
+  (let ([v x])
+    (* v v)))
+\end{lstlisting}
+
+\begin{keypoint}
+A pattern variable in a template stands for a piece of code, not a value. Using it twice in the template copies the code twice, and the code then runs twice. When a macro needs an argument's value more than once, it should bind the argument to a variable once.
+\end{keypoint}
+
+\subsection{A Name Introduced by the Macro}
+
+The \code{let} introduces a name, \code{b}, that the user never wrote. What happens when the user's own arguments mention a \code{b} is the subject of \Cref{sec:hygiene}.

@@ -1,0 +1,31 @@
+\chapter{Week 7: Recursion and Objects}
+\label{ch:week7}
+
+Lecture 7: October 20, 2026. Recitation 7: October 23, 2026.
+
+Assigned reading and resources (course page):
+\begin{itemize}
+  \item \cite{PLAI} Chapter 9 (Recursion and Cycles: Procedures and Data), which builds recursive functions out of a placeholder and mutation, as this chapter does.
+  \item \cite{PLAI} Chapter 10 (Objects), whose objects-by-desugaring sections follow the same path as \Cref{sec:objects}: messages, constructors, state, static members, \code{self}, dynamic dispatch, and inheritance through a parent object.
+  \item Lecture code: \code{lecture07.zip}. According to the course page, its interpreter that encodes recursion with boxes (\Cref{sec:recboxes}) is a bit cleaner than the version written in lecture.
+\end{itemize}
+
+Further reading:
+\begin{itemize}
+  \item \cite{TAPL} Section 5.2 (Programming in the Lambda-Calculus), whose last part on recursion defines \code{fix}, the call-by-value fixed-point combinator, which is \code{Z} of \Cref{sec:rec7}; optional.
+\end{itemize}
+
+Under lexical scope, a function cannot call itself by the name it is being defined with: when the closure is created, that name is not bound yet. This chapter adds a form \code{rec} for recursive functions and implements it twice. The first version teaches application to rebind the function's own name at every call. The second version uses no new kind of value at all. It builds the cycle that recursion needs out of a box, by first creating a placeholder and then filling it in, a technique called \emph{backpatching}, packaged as a function \code{fix}. The same ideas then build objects: an object is a closure that dispatches on messages, its fields are mutable variables or boxes, it finds \code{self} either by backpatching or by taking itself as an argument, and it inherits by delegating to a parent object. The recitation gets recursion with no mutation at all, from the Y and Z combinators. This chapter covers:
+\begin{itemize}
+  \item \Cref{sec:recproblem}: \code{if0} and \code{rec}, why \code{let} cannot define a recursive function, and a first implementation with a new value \code{recV};
+  \item \Cref{sec:cycles}: cyclic data built from Racket boxes, backpatching a recursive function in Racket, and \code{fix};
+  \item \Cref{sec:recboxes}: \code{rec} in the store-passing interpreter, desugared into a call to \code{fix}, or inlined with a fresh name, and why both need a forwarding function;
+  \item \Cref{sec:objects}: objects as closures over messages, constructors, private, shared, and static state, two ways to get \code{self}, trees built from objects, and inheritance by delegation;
+  \item \Cref{sec:rec7}: Recitation~7, circular lists and trees with boxes, fixed points, the Y and Z combinators, and \code{rec} implemented with \code{Z}.
+\end{itemize}
+
+\input{chapters/week7/01-recursion-problem}
+\input{chapters/week7/02-cycles}
+\input{chapters/week7/03-rec-boxes}
+\input{chapters/week7/04-objects}
+\input{chapters/week7/05-recitation7}

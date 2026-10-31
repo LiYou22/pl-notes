@@ -1,0 +1,88 @@
+\section{Cycles from Boxes}
+\label{sec:cycles}
+
+The \code{recV} solution needs a new kind of value and a special case in application. Racket's own \code{letrec} works differently: it builds the cycle directly, with mutation. This section shows the idea in plain \code{\#lang racket}.
+
+\subsection{A Box That Contains Itself}
+
+The direct attempt at a value that refers to itself is
+\begin{lstlisting}
+(let ([b b])
+  b)
+\end{lstlisting}
+and it fails with \code{b: unbound identifier}, for the reason of \Cref{sec:recproblem}: the right-hand side is evaluated before \code{b} is bound. A box gets around this:
+\begin{lstlisting}
+(let ([b (box 'dummy)])
+  (begin
+    (set-box! b b)
+    b))
+\end{lstlisting}
+The program first creates a box holding a placeholder, \code{'dummy}. It then replaces the contents with the box itself. The result is a cycle of length one: unboxing \code{b} gives \code{b} again, however many times we unbox. Racket prints it as
+\begin{lstlisting}[style=repl]
+#0='#&#0#
+\end{lstlisting}
+Here \code{\#\&} marks a box, \code{\#0=} labels a value as number 0, and \code{\#0\#} refers back to that value. So the output reads ``a box whose contents are value 0'', which is the box itself.
+
+A cycle of length two works the same way:
+\begin{lstlisting}
+(let* ([b1 (box 'dummy)]
+       [b2 (box b1)])
+  (set-box! b1 b2)
+  b1)
+\end{lstlisting}
+\code{b2} is built holding \code{b1}, which already exists. Then \code{b1} is changed to hold \code{b2}, which closes the cycle. Racket prints \code{\#0='\#\&\#\&\#0\#}, a box holding a box holding the first box. \code{let*} is needed because the initial value of \code{b2} refers to \code{b1}.
+
+\begin{remark}
+These examples only run in \code{\#lang racket}. In \code{plai-typed}, the body of a \code{let*} must be a single expression, so the second example is a syntax error without a \code{begin}. Worse, neither example can be typed: a box that contains itself would need the infinite type ``box of box of box of \dots''. The checker reports \code{(boxof symbol) vs.\ symbol} for the first one.
+\end{remark}
+
+\subsection{Backpatching}
+
+Both examples follow the same three steps, and so does every cycle built this way:
+\begin{enumerate}
+  \item \emph{Placeholder}: create a box holding a dummy value.
+  \item \emph{Build}: create the things that refer to the box. This is possible because the box already exists.
+  \item \emph{Patch}: use \code{set-box!} to put the real value into the box, which closes the cycle.
+\end{enumerate}
+This technique is called \emph{backpatching}. It is exactly what a recursive function needs. The function's environment must refer to the function. With backpatching, the environment refers to a box instead, and the box is filled with the function once the function exists.
+
+\subsection{A Recursive Function in Racket}
+
+\begin{lstlisting}
+(let* ([fact (box 'dummy)]
+       [fact-fun (lambda (n)
+                   (if (equal? n 0)
+                       1
+                       (* n ((unbox fact) (+ n -1)))))])
+  (begin
+    (set-box! fact fact-fun)
+    ((unbox fact) 5)))
+\end{lstlisting}
+The three steps are visible. \code{fact} is the placeholder box. \code{fact-fun} is a closure whose saved environment contains \code{fact}. \code{set-box!} puts the closure into the box. From then on, the body finds the box through \code{fact}, unboxes it, and gets \code{fact-fun} itself. The result is 120.
+
+\begin{pitfall}[\code{let} instead of \code{let*}]
+With \code{let}, the same program is rejected with \code{fact: unbound identifier}. In a \code{let}, every right-hand side is evaluated in the outer scope, so the \code{lambda} cannot see the \code{fact} bound next to it (\Cref{sec:substrev}). This is the problem of \Cref{sec:recproblem} once more: the function's own name must be in scope when its closure is created.
+\end{pitfall}
+
+Note that the body has to write \code{((unbox fact) (+ n -1))}, not \code{(fact (+ n -1))}. The programmer has to know that \code{fact} is a box.
+
+\subsection{\texttt{fix}: Backpatching Once and for All}
+
+The three steps do not depend on what the function computes, so they can be written once, as a function \code{fix}. Its argument \code{f} is the function to make recursive, written so that it receives ``the recursive call'' as an extra first argument \code{rec}:
+\begin{lstlisting}
+(define fix
+  (lambda (f)
+    (let* ([b (box 'dummy)]
+           [frec (lambda (x)
+                   (f (unbox b) x))])
+      (begin
+        (set-box! b frec)
+        frec))))
+
+(define fact-alt
+  (fix (lambda (rec n)
+         (if (equal? 0 n)
+             1
+             (* n (rec (- n 1)))))))
+\end{lstlisting}
+\code{(fact-alt 5)} is 120. The steps are as before, with one change: the box holds \code{frec}, not \code{f}. \code{frec} takes the real argument \code{x}, fetches itself from the box, and calls \code{f} with itself as \code{rec}. So when \code{f}'s body calls \code{(rec (- n 1))}, it calls \code{frec} again, which goes through the box again. The function passed to \code{fix} never mentions a box: it calls \code{rec} like any other function. \Cref{sec:recboxes} does the same inside our interpreter, with \code{fix} written in the interpreted language.

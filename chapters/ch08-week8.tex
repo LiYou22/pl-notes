@@ -1,0 +1,46 @@
+\chapter{Week 8: Macros}
+\label{ch:week8}
+
+Lecture 8: October 27, 2026. Recitation 8: October 30, 2026.
+
+Assigned reading and resources (course page):
+\begin{itemize}
+  \item \cite{PLAI} Chapter 13 (Desugaring as a Language Feature).
+  \item \cite{RacketGuide} Chapter 16 (Macros), and the further resources it links to.
+  \item \cite{ClingerWand}, optional: the history of how hygienic macro systems were developed (\Cref{sec:hygiene}).
+  \item Lecture code: \code{lecture08.rkt}.
+\end{itemize}
+
+Further reading:
+\begin{itemize}
+  \item \cite{FearOfMacros}, a tutorial on \code{syntax-case}, \code{with-syntax}, and \code{datum->syntax}, recommended by the Racket Guide; it covers deliberately unhygienic macros like \code{aif} (\Cref{sec:aif}).
+  \item \cite{PLAI} Chapter 4 (A First Taste of Desugaring), the desugaring inside an interpreter that macros hand to the programmer.
+  \item \cite{TAPL} Section 5.2 (Programming in the Lambda-Calculus): Church booleans and numerals, and recursion, as in Recitation~8 (\Cref{sec:rec8}); optional.
+\end{itemize}
+
+Some constructs cannot be functions. A function call evaluates every argument first, once, so a function cannot skip an argument (\code{or}, \code{if}), repeat one (\code{while}), look at an argument's text (\code{assert}), or assign to the caller's variables (\code{swap}). A \emph{macro} can: it is a function from syntax to syntax that Racket runs before evaluation, rewriting each use into other code. This is the desugaring our interpreters have done all along (\code{let} into \code{lambda}, \code{rec} into boxes), now available to the programmer. Hygiene can also be broken on purpose, one name at a time. The recitation turns away from macros to the lambda calculus, a language with nothing but functions, and encodes booleans, numbers, and recursion in it. This chapter covers:
+\begin{itemize}
+  \item \Cref{sec:orfun}: why \code{or} cannot be a function under call-by-value;
+  \item \Cref{sec:myor}: \code{define-syntax}, \code{syntax-case}, syntax objects and \code{\#'} templates, with \code{my-or}, \code{my-if}, \code{define-syntax-rule}, and \code{unless};
+  \item \Cref{sec:mywhile}: a recursive macro that never stops expanding, and a \code{while} loop that expands into a recursive function instead;
+  \item \Cref{sec:myassert}: a macro that uses its argument both as code to run and as data to print;
+  \item \Cref{sec:multior}: ellipsis patterns, recursion that terminates by shrinking the arguments, and binding an argument once to avoid evaluating it twice;
+  \item \Cref{sec:hygiene}: variable capture, hygienic expansion, and hygiene as lexical scope for macros;
+  \item \Cref{sec:literals}: keywords in patterns with the literal list;
+  \item \Cref{sec:mylet}: \code{let}, \code{let*}, and multi-binding \code{let} as macros into \code{lambda};
+  \item \Cref{sec:swap}: \code{swap} as a function, with boxes, and as a macro that mutates the caller's variables;
+  \item \Cref{sec:aif}: an anaphoric \code{aif} that deliberately captures \code{it} with \code{datum->syntax} (not covered in lecture);
+  \item \Cref{sec:rec8}: Recitation~8, the lambda calculus: substitution and alpha-equivalence, normal-order evaluation, Church booleans and numerals, and \code{Y} under normal order.
+\end{itemize}
+
+\input{chapters/week8/01-or-function}
+\input{chapters/week8/02-syntax-case}
+\input{chapters/week8/03-while}
+\input{chapters/week8/04-assert}
+\input{chapters/week8/05-multi-or}
+\input{chapters/week8/06-hygiene}
+\input{chapters/week8/07-literals}
+\input{chapters/week8/08-my-let}
+\input{chapters/week8/09-swap}
+\input{chapters/week8/10-aif}
+\input{chapters/week8/11-recitation8}

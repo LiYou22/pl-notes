@@ -1,0 +1,58 @@
+\section{\texttt{let} as a Macro}
+\label{sec:mylet}
+
+In \Cref{sec:substrev} we observed that \code{let} is an application of a \code{lambda} in disguise, and our interpreters used that equation to desugar \code{letC}. A macro states the same equation in Racket itself:
+\begin{lstlisting}
+(define-syntax (my-let1 stx)
+  (syntax-case stx ()
+    [(my-let1 ([var val]) body)
+     #'((lambda (var) body) val)]))
+\end{lstlisting}
+The pattern matches a \code{let} with exactly one binding, written with Racket's usual double parentheses. For example,
+\begin{lstlisting}
+(my-let1 ([x 3]) (+ x x))
+---> ((lambda (x) (+ x x)) 3)
+\end{lstlisting}
+which evaluates to 6. Square brackets and parentheses are interchangeable in patterns, as everywhere in Racket; the brackets only make the binding easier to read.
+
+The pattern variable \code{var} appears in the template in a \emph{binding} position, as the parameter of the \code{lambda}. So the user's \code{x} is bound by a \code{lambda} the macro wrote. This is fine under hygiene: the user wrote both the binding \code{x} and its uses in \code{body}, so they agree, and they are both resolved at the use site.
+
+\subsection{\texttt{my-let*}: Recursion over the Bindings}
+
+\code{let*} binds its variables one at a time, so each right-hand side can use the variables before it. Desugared into \code{lambda}s, each binding becomes one application, nested inside the previous one:
+\begin{lstlisting}
+(my-let* ([x1 e1] [x2 e2]) e3)
+---> ((lambda (x1) ((lambda (x2) e3) e2)) e1)
+\end{lstlisting}
+Since \code{e2} sits inside \code{(lambda (x1) \dots)}, it is in the scope of \code{x1}. The macro produces this nesting by recursion on the list of bindings, the same shape as \code{multi-or} (\Cref{sec:multior}):
+\begin{lstlisting}
+(define-syntax (my-let* stx)
+  (syntax-case stx ()
+    [(my-let* ([var val]) body)
+     #'((lambda (var) body) val)]
+    [(my-let* ([var val] . rest) body)
+     #'((lambda (var) (my-let* rest body)) val)]))
+\end{lstlisting}
+The first clause is the base case, a single binding, which is \code{my-let1}. The second peels off the first binding. Its pattern \code{([var val] . rest)} is a dotted pair, as in \Cref{ch:week1}: \code{rest} matches the \emph{list} of the remaining bindings, so the template can pass it on unchanged, \code{(my-let* rest body)}, to a recursive use with one binding fewer. Expansion therefore terminates. An equivalent pattern is \code{([var val] rest ...)}, where \code{rest} matches the remaining bindings as a sequence and the template must wrap them back into a list, \code{(my-let* (rest ...) body)}. The order of the clauses matters: a single binding also matches the second pattern, with \code{rest} empty, and would expand to \code{(my-let* () body)}, which no clause matches. Listing the one-binding clause first catches that case before it reaches the second.
+
+For example, \code{(my-let* ([x 1] [y (+ x 1)]) (* x y))} expands to \code{((lambda (x) ((lambda (y) (* x y)) (+ x 1))) 1)} and evaluates to 2. With \code{let} instead of \code{let*}, the \code{x} in \code{(+ x 1)} would be unbound, because all right-hand sides of a \code{let} are evaluated outside the new bindings.
+
+\subsection{\texttt{my-let}: Many Bindings at Once}
+
+A \code{let} with several bindings is a single \code{lambda} with several parameters, applied to all the right-hand sides at once:
+\begin{lstlisting}
+(let ([x1 e1] [x2 e2] [x3 e3]) body)
+---> ((lambda (x1 x2 x3) body) e1 e2 e3)
+\end{lstlisting}
+No recursion is needed; an ellipsis does it in one step:
+\begin{lstlisting}
+(define-syntax (my-let stx)
+  (syntax-case stx ()
+    [(my-let ([var val] ...) body)
+     #'((lambda (var ...) body) val ...)]))
+\end{lstlisting}
+In the pattern, the ellipsis follows the sub-pattern \code{[var val]}, so it matches a sequence of pairs, and \code{var} and \code{val} each stand for a sequence: all the names, and all the right-hand sides, in order. The template uses the two sequences separately, \code{var ...} as the parameter list and \code{val ...} as the arguments. The ellipsis thus ``unzips'' the list of pairs into two lists.
+
+\begin{keypoint}
+\code{let} and \code{let*} desugar differently. In \code{my-let}, every \code{val} is an argument of the one application, outside the \code{lambda}, so no right-hand side can see any of the new variables. In \code{my-let*}, each \code{val} is inside the \code{lambda}s of the earlier bindings, so it can see them.
+\end{keypoint}

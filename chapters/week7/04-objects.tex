@@ -1,0 +1,230 @@
+\section{Objects from Closures}
+\label{sec:objects}
+
+This section asks whether objects need to be built into a language, or whether the features we already have are enough. The answer is that closures and mutable state go a long way. The code in this section is plain \code{\#lang racket}.
+
+\subsection{An Object Is a Function on Messages}
+
+An object answers \emph{messages}. In a language like Java, \code{o.add(x, y)} sends the message \code{add} with arguments \code{x} and \code{y} to \code{o}. We can model \code{o} as a function that takes a message name and returns the method for it:
+\begin{lstlisting}
+(define o-1
+  (lambda (m)
+    (case m
+      [(add) (lambda (x y) (+ x y))]
+      [(add1) (lambda (x) (+ x 1))]
+      [(sub1) (lambda (x) (- x 1))])))
+\end{lstlisting}
+\code{((o-1 'add1) 5)} is 6 and \code{((o-1 'add) 5 6)} is 11. The \code{case} on the message is the object's \emph{dispatch}: it picks the method that the message names.
+
+Writing two calls each time is clumsy, so a helper sends a message with any number of arguments:
+\begin{lstlisting}
+(define (msg o m . a)
+  (apply (o m) a))
+\end{lstlisting}
+The dot in the parameter list makes \code{a} a \emph{rest parameter}: it collects all remaining arguments into a list. \code{apply} then calls the method with the elements of that list as its arguments. So \code{(msg o-1 'add 5 6)} is \code{((o-1 'add) 5 6)}, which is 11.
+
+\begin{pitfall}[\code{(lambda m ...)} versus \code{(lambda (m) ...)}]
+Without parentheses, \code{(lambda m body)} also takes any number of arguments and binds \code{m} to the \emph{list} of them. In an object written that way, \code{(o 'first)} binds \code{m} to \code{'(first)}, no \code{case} clause matches, and the call quietly returns nothing.
+\end{pitfall}
+
+\subsection{Constructors and Fields}
+
+A \emph{constructor} is a function that returns an object. Its parameters become the object's fields, because the methods are closures that capture them:
+\begin{lstlisting}
+(define (o-constr-1 x)
+  (lambda (m)
+    (case m
+      ((addX) (lambda (y) (+ x y))))))
+\end{lstlisting}
+\code{(msg (o-constr-1 10) 'addX 5)} is 15. Each call of \code{o-constr-1} creates a new closure with its own \code{x}, so each object has its own field.
+
+\subsection{State}
+
+Fields captured this way cannot change. For mutable fields, the constructor puts the value in a box, as in \Cref{sec:scopestate}:
+\begin{lstlisting}
+(define (obj-counter count)
+  (let [(b (box count))]
+    (lambda (m)
+      (case m
+        [(inc) (lambda () (set-box! b (+ (unbox b) 1)))]
+        [(dec) (lambda () (set-box! b (- (unbox b) 1)))]
+        [(get) (lambda () (unbox b))]))))
+\end{lstlisting}
+Every call of the constructor creates a new box, so two counters do not affect each other:
+\begin{lstlisting}[style=repl]
+(define cntr (obj-counter 0))
+(define cntr2 (obj-counter 10))
+(msg cntr 'inc)
+(msg cntr 'inc)
+(msg cntr 'dec)
+(msg cntr 'get)     ; 1
+(msg cntr2 'inc)
+(msg cntr2 'get)    ; 11
+(msg cntr 'get)     ; 1, unchanged by cntr2
+\end{lstlisting}
+The box is also \emph{private}. Only the methods can reach it, since nothing outside the closure has a name for \code{b}. The only way to change a counter is to send it \code{inc} or \code{dec}.
+
+\subsubsection{Where the box is created decides who shares it} The next version moves the box out of the object:
+\begin{lstlisting}
+(define (obj-counter-share count)
+  (let ([b (box count)])
+    (lambda (count)
+      (begin (set-box! b count)
+             (lambda (m)
+               (case m
+                 [(inc) (lambda () (set-box! b (+ (unbox b) 1)))]
+                 [(dec) (lambda () (set-box! b (- (unbox b) 1)))]
+                 [(get) (lambda () (unbox b))]))))))
+\end{lstlisting}
+\code{obj-counter-share} now returns a \emph{constructor}, and all objects made by that constructor share one box:
+\begin{lstlisting}[style=repl]
+(define mk (obj-counter-share 0))
+(define a (mk 1))
+(define b (mk 10))      ; resets the shared box to 10
+(msg a 'inc)
+(list (msg a 'get) (msg b 'get))   ; '(11 11)
+\end{lstlisting}
+Two details matter. Objects share the box only if they come from the \emph{same} \code{mk}; a second call of \code{obj-counter-share} creates a second box. And every new object runs \code{(set-box! b count)}, which overwrites the value seen by all existing objects.
+
+\subsubsection{Static fields} The usual way to share state among all objects of a class is to create the shared state once, when the constructor itself is defined. The lecture writes this version with Racket's \code{set!} instead of boxes:
+\begin{lstlisting}
+(define o-static-1
+  (let ([numobj 0])
+    (lambda (amount)
+      (begin
+        (set! numobj (+ 1 numobj))
+        (lambda (m)
+          (case m
+            [(inc) (lambda (n) (set! amount (+ amount n)))]
+            [(dec) (lambda (n) (set! amount (- amount n)))]
+            [(get) (lambda () amount)]
+            [(count) (lambda () numobj)]))))))
+\end{lstlisting}
+The \code{let} runs once, when \code{o-static-1} is defined, so \code{numobj} is shared by every object: it is a \emph{static field}, and here it counts the objects created. The parameter \code{amount} is bound anew on every constructor call, so it belongs to one object: it is an \emph{instance field}.
+\begin{lstlisting}[style=repl]
+(let ([o (o-static-1 1000)])
+  (msg o 'count))         ; 1
+(let ([o (o-static-1 0)])
+  (msg o 'count))         ; 2
+\end{lstlisting}
+\code{set!} changes a variable, while \code{set-box!} changes a box that a variable names. The behavior is the same as with \code{(box 0)} for \code{numobj} and \code{(box amount)} for the counter: a Racket variable that is assigned is in effect a box that the language creates for us. In the terms of \Cref{sec:rec6}, the environment maps the name to a location, and \code{set!} overrides that location.
+
+\begin{keypoint}[Lifetime of a binding = how widely it is shared]
+State created outside the constructor is shared by all objects; state created inside it, including the constructor's own parameters, belongs to one object. Static versus instance fields is just the question of which \code{let} or \code{lambda} the variable is bound by.
+\end{keypoint}
+
+\subsection{\texttt{self}}
+
+A method often needs to send a message to its own object, as \code{this.second(x)} does in Java. The object therefore needs a name for itself. This is the problem of \Cref{sec:recproblem} again: the object must refer to the object, but it does not exist until it is built. There are two solutions.
+
+\subsubsection{\code{self} through a box} The first uses the backpatching of \Cref{sec:cycles}:
+\begin{lstlisting}
+(define o-self!
+  (let ([self (box 'dummy)])
+    (begin
+      (set-box! self
+            (lambda (m)
+              (case m
+                [(first) (lambda (x) (msg (unbox self) 'second (+ x 1)))]
+                [(second) (lambda (x) (+ x 1))])))
+      (unbox self))))
+\end{lstlisting}
+The three steps are the same as before. \code{self} is a placeholder box. The object is built inside its scope, so the method \code{first} can reach the box. \code{set-box!} puts the object into the box. When \code{first} runs, \code{(unbox self)} is the object itself. \code{(msg o-self! 'first 5)} computes \code{5 + 1}, sends \code{second}, and returns 7. The name \code{self} plays exactly the role that \code{f} played for \code{rec}.
+
+\subsubsection{\code{self} as an argument} The second solution needs no mutation. Every method takes the object as an extra first argument:
+\begin{lstlisting}
+(define o-self
+  (lambda (m)
+    (case m
+      [(first) (lambda (self x) (msg/self self 'second (+ x 1)))]
+      [(second) (lambda (self x) (+ x 1))])))
+\end{lstlisting}
+The sender passes it, through a variant of \code{msg} that supplies the object twice, once to find the method and once as its first argument:
+\begin{lstlisting}
+(define (msg/self o m . a)
+  (apply (o m) o a))
+\end{lstlisting}
+\code{(msg/self o-self 'first 5)} is 7, as before. This is the explicit \code{self} parameter of Python methods: \code{o.f(x)} means \code{f(o, x)}. Every call between methods must then go through \code{msg/self}; a plain \code{msg} would pass one argument too few.
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+& \code{o-self!} & \code{o-self} \\
+\midrule
+how a method finds \code{self} & through a box in its closure & the caller passes it \\
+needs mutation & yes (backpatching) & no \\
+send with & \code{msg} & \code{msg/self} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{Messages are values} Since a message is just a symbol, the program can compute which message to send:
+\begin{lstlisting}
+(define test
+  (lambda (x)
+    (msg o-self! (if (equal? x 1) 'first 'second) 5)))
+\end{lstlisting}
+\code{(test 1)} sends \code{first} and gives 7; \code{(test 2)} sends \code{second} and gives 6. The method that runs is chosen at run time from a value. An ordinary method call such as \code{o.first(5)} fixes the method name in the program text; with closures, the name is just data.
+
+\subsection{Objects with Structure: Trees}
+
+Objects can refer to other objects. A binary tree is a node object whose fields are a value and two subtrees, and an empty-tree object \code{mt} with no fields:
+\begin{lstlisting}
+(define (mt)
+  (lambda (m)
+    (case m
+      [(add) (lambda () 0)])))
+
+(define (node v l r)
+  (lambda (m)
+    (case m
+      [(add) (lambda () (+ v
+                           (msg l 'add)
+                           (msg r 'add)))])))
+\end{lstlisting}
+\code{add} sums the values in the tree. A node answers it by sending \code{add} to its two subtrees and combining the answers; the empty tree answers 0. \code{mt} is a constructor with no arguments, so an empty tree is written \code{(mt)}.
+\begin{lstlisting}
+(define a-tree
+  (node 10
+        (node 5 (mt) (mt))
+        (node 15 (node 6 (mt) (mt)) (mt))))
+\end{lstlisting}
+\code{(msg a-tree 'add)} is $10 + 5 + 15 + 6 = 36$.
+
+The node never asks whether a subtree is a node or an empty tree. It sends the message, and each subtree runs its own method. Which code runs is decided by the object that receives the message, not by the sender. This is \emph{dynamic dispatch}.
+
+\subsection{Inheritance by Delegation}
+
+Now add a \code{size} message, which counts the nodes, without editing \code{node} and \code{mt}. A new constructor takes the old one as an argument, the \emph{parent}, and builds a parent object with the same fields. It answers \code{size} itself and passes every other message on to the parent object:
+\begin{lstlisting}
+(define (node/size parent-maker v l r)
+  (let ([parent-object (parent-maker v l r)])
+    (lambda (m)
+          (case m
+            [(size) (lambda () (+ 1
+                                  (msg l 'size)
+                                  (msg r 'size)))]
+            [else (parent-object m)]))))
+
+(define (mt/size parent-maker)
+  (let ([parent-object (parent-maker)])
+    (lambda (m)
+      (case m
+        [(size) (lambda () 0)]
+        [else (parent-object m)]))))
+\end{lstlisting}
+The \code{else} clause is the whole mechanism: a message the child does not know is \emph{delegated} to the parent, so the child inherits \code{add}. Every node of the tree has to be built with the new constructors, with \code{node} and \code{mt} passed as the parents:
+\begin{lstlisting}
+(define a-tree/size
+  (node/size node
+             10
+             (node/size node 5 (mt/size mt) (mt/size mt))
+             (node/size node 15
+                        (node/size node 6 (mt/size mt) (mt/size mt))
+                        (mt/size mt))))
+\end{lstlisting}
+\code{(msg a-tree/size 'size)} is 4, and \code{(msg a-tree/size 'add)} is still 36. For \code{add}, the outer \code{node/size} object delegates to its parent \code{node} object. That object sends \code{add} to \code{l} and \code{r}, which are \code{node/size} objects, and they delegate in turn. All subtrees must be \code{/size} objects: if one were a plain \code{node}, \code{size} would reach it and match no \code{case} clause. The dispatch would return \code{\#<void>} instead of a method, and \code{msg} would fail with \code{application: not a procedure}.
+
+\begin{remark}
+The parent object is built from \code{v}, \code{l}, and \code{r} alone; it never learns that a child exists. So delegation passes on the message but not the object. If a parent method sent a message to itself through a \code{self} of its own, as \code{o-self!} does, the message would reach the parent, and a method that the child overrides would not be used. Inheritance in the usual sense makes \code{self} mean the child, for example by passing the child as \code{self} in the style of \code{o-self}.
+\end{remark}

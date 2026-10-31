@@ -1,0 +1,99 @@
+\section{The Problem of Recursion}
+\label{sec:recproblem}
+
+\subsection{Two New Forms}
+
+We start from the closure interpreter of \Cref{sec:closures} and add two forms. \code{(if0 e1 e2 e3)} evaluates \code{e1}. If the result is 0, it evaluates \code{e2}; otherwise it evaluates \code{e3}. This is enough branching to write a base case. \code{(rec f x e)} is a function with parameter \code{x} and body \code{e}, whose body may call the function itself under the name \code{f}.
+\begin{lstlisting}
+(define-type Expr
+  [numC (n : number)]
+  [plusC (e1 : Expr) (e2 : Expr)]
+  [timesC (e1 : Expr) (e2 : Expr)]
+  [letC (x : symbol) (e1 : Expr) (e2 : Expr)]
+  [lambdaC (x : symbol) (e : Expr)]
+  [appC (e1 : Expr) (e2 : Expr)]
+  [idC (x : symbol)]
+  [if0C (guard : Expr) (e1 : Expr) (e2 : Expr)]
+  [recC (f : symbol) (x : symbol) (e : Expr)])
+\end{lstlisting}
+The parser gets one line for each:
+\begin{lstlisting}
+            [(rec) (recC (s-exp->symbol (second l)) (s-exp->symbol (third l)) (parse (fourth l)))]
+            [(if0) (if0C (parse (second l)) (parse (third l)) (parse (fourth l)))]
+\end{lstlisting}
+\code{if0} only evaluates the branch it chooses, just like \code{if} in Racket:
+\begin{lstlisting}
+    [if0C (guard e1 e2)
+          (let [(v (eval-env env guard))]
+            (if (equal? v (numV 0))
+                (eval-env env e1)
+                (eval-env env e2)))]
+\end{lstlisting}
+\code{(if0 0 1 2)} is 1 and \code{(if0 1 1 2)} is 2. The guard's value is compared with \code{(numV 0)} as a whole, so a guard that is not a number, such as a closure, is simply ``not 0'' and selects \code{e3} rather than raising an error. With both forms, factorial is written
+\begin{lstlisting}
+(rec fact n (if0 n 1 (* n (fact (+ n -1)))))
+\end{lstlisting}
+
+\subsection{Why \texttt{let} Is Not Enough}
+
+Without \code{rec}, the natural attempt is to bind the function with \code{let}:
+\begin{lstlisting}
+(let fact (lambda n (if0 n 1 (* n (fact (+ n -1)))))
+  (fact 5))
+\end{lstlisting}
+Under lexical scope this fails with \code{No binding found}. The \code{lambda} is evaluated \emph{before} \code{let} binds \code{fact}, so the closure saves an environment without \code{fact}. When the body later calls \code{fact}, it looks the name up in that saved environment and does not find it.
+
+Under dynamic scope, the same program works. The body is evaluated in the environment of the \emph{call} \code{(fact 5)}, and by then \code{let} has bound \code{fact}. This is one of the few things dynamic scope makes easier, and it is no reason to go back to it (\Cref{sec:dynscope}). We want recursion and lexical scope together.
+
+\subsection{A First Solution: \code{recV}}
+
+The function needs an environment that contains the function itself. That is a chicken-and-egg problem. To build the closure we need its environment first, and the environment is supposed to contain the closure.
+
+The first solution avoids the cycle by \emph{waiting}. A new kind of value records the function's own name next to the usual closure fields:
+\begin{lstlisting}
+(define-type Value
+  [numV (n : number)]
+  [closV (env : Env) (x : symbol) (e : Expr)]
+  [recV (env : Env) (f : symbol) (x : symbol) (e : Expr)])
+\end{lstlisting}
+\code{rec} only packages these fields, without binding \code{f}:
+\begin{lstlisting}
+    [recC (f x e) (recV env f x e)]
+\end{lstlisting}
+The binding happens at each call. Application now has to tell the kinds of function apart:
+\begin{lstlisting}
+    [appC (e1 e2)
+          (let [(v1 (eval-env env e1))
+                (v2 (eval-env env e2))]
+            (type-case Value v1
+              [closV (env x e)
+                     (eval-env (extend-env (bind x v2) env) e)]
+              [recV (env f x e)
+                    (eval-env (extend-env (bind f v1) (extend-env (bind x v2) env)) e)]
+              [numV (n)
+                    (error 'eval-env "Error: applied number as a function")]))]
+\end{lstlisting}
+In the \code{recV} case, \code{v1} \emph{is} the function being called. So binding \code{f} to \code{v1} makes the function's own name visible in its body. By the time of the call, \code{v1} already exists, so there is no cycle to build. Every recursive call goes through \code{appC} again and adds the binding again, so recursion can go as deep as needed.
+
+For \code{((rec fact n ...) 2)}, the body runs in
+\begin{lstlisting}[style=repl]
+[fact = recV(...), n = 2, the environment where rec was evaluated]
+\end{lstlisting}
+and the call \code{(fact (+ n -1))} in the body finds the same \code{recV}.
+
+The order of the two bindings matters only when \code{f} and \code{x} are the same name. Here \code{f} is added last, so in \code{(rec g g ...)} the name \code{g} in the body means the function, not the argument. Binding \code{x} last instead would let the parameter shadow the function name, which is what Racket does for \code{(letrec ([g (lambda (g) ...)]) ...)}.
+
+The lecture's examples:
+\begin{lstlisting}
+((rec fact x (if0 x 1 (* x (fact (+ x -1))))) 5)           ; 120
+
+(let fact (rec f x (if0 x 1 (* x (f (+ x -1)))))
+  (fact 6))                                                ; 720
+
+(let fibb (rec f x (if0 x
+                        0
+                        (if0 (+ x -1) 1
+                             (+ (f (+ x -1)) (f (+ x -2))))))
+  (fibb 6))                                                ; 8
+\end{lstlisting}
+In the last two, the name the body uses for itself, \code{f}, is not the name the rest of the program uses, \code{fact} or \code{fibb}. The \code{let} only names the finished \code{recV} for the outside. The recursive calls go through \code{f}, which \code{appC} binds at every call.

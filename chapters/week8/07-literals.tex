@@ -1,0 +1,23 @@
+\section{Keywords in Patterns: \texttt{my-if2}}
+\label{sec:literals}
+
+Every \code{syntax-case} so far had an empty list \code{()} after \code{stx}. That list names \emph{literals}: identifiers that a pattern matches exactly, instead of binding them as pattern variables. They let a macro have keywords of its own:
+\begin{lstlisting}
+(define-syntax (my-if2 stx)
+  (syntax-case stx (then else)
+    [(my-if2 e1 then e2 else e3)
+     #'(if e1 e2 e3)]))
+\end{lstlisting}
+In the pattern, \code{e1}, \code{e2}, and \code{e3} are pattern variables, but \code{then} and \code{else} are listed as literals, so the use must contain those words in those positions:
+\begin{lstlisting}
+(my-if2 (> 2 1) then "yes" else "no")    ; expands to (if (> 2 1) "yes" "no")
+\end{lstlisting}
+A use without the keywords, such as \code{(my-if2 (> 2 1) "yes" "no")}, matches no clause, and the expander reports a syntax error for \code{my-if2} before the program runs.
+
+\begin{pitfall}[Forgetting the literal list]
+Without \code{(then else)}, the pattern \code{(my-if2 e1 then e2 else e3)} would treat \code{then} and \code{else} as two more pattern variables. Every use with five subforms would match, whatever words stood in those positions, and \code{(my-if2 c 1 2 3 4)} would expand to \code{(if c 2 4)} without complaint.
+\end{pitfall}
+
+\begin{remark}
+A literal is matched as an identifier, by binding, not only by spelling: the \code{else} in the use must refer to the same \code{else} as the one in the macro's literal list. This is hygiene again (\Cref{sec:hygiene}), applied to keywords. \code{cond}'s \code{else} works the same way.
+\end{remark}

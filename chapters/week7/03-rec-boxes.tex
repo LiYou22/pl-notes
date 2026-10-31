@@ -1,0 +1,127 @@
+\section{\texttt{rec} with Boxes}
+\label{sec:recboxes}
+
+\subsection{The Starting Point}
+
+To use backpatching inside our own language, the language needs boxes. So the lecture starts again from the box interpreter of \Cref{sec:storepass} and adds \code{if0C} and \code{recC} to it. \tyname{Expr} has \code{boxC}, \code{unboxC}, \code{setboxC}, and \code{seqC}; \tyname{Value} has \code{boxV} but no \code{recV}; and \code{eval-env} takes a store and returns a \tyname{Result}:
+\begin{lstlisting}
+(define (eval-env (env : Env) (sto : Store) (e : Expr)) : Result
+  ...)
+\end{lstlisting}
+Every case threads the store: the store returned by one subexpression is passed to the next one. As in \Cref{sec:storepass}, \code{let} is not a case of its own but is rewritten into an application:
+\begin{lstlisting}
+    [letC (x e1 e2) (eval-env env sto (appC (lambdaC x e2) e1))]
+\end{lstlisting}
+
+\subsubsection{Threading the store through \code{if0}} \code{if0} changes in the same way as \code{plusC}:
+\begin{lstlisting}
+    [if0C (guard e1 e2)
+          (type-case Result (eval-env env sto guard)
+            (res (v sto-1)
+                 (if (equal? v (numV 0))
+                     (eval-env env sto-1 e1)
+                     (eval-env env sto-1 e2))))]
+\end{lstlisting}
+There are three reasons for this shape. First, \code{eval-env} now returns a \tyname{Result}, so the value \code{v} has to be taken out before it can be compared with 0. Second, the guard may have side effects, and the chosen branch must see them. So the branch runs in \code{sto-1}, not \code{sto}:
+\begin{lstlisting}
+(let b (box 5)
+  (if0 (begin (set-box! b 0) (unbox b))
+       (unbox b)    ; must see 0, the value the guard stored
+       99))
+\end{lstlisting}
+With \code{sto}, the branch would still see 5. Third, the branch's own \tyname{Result} is returned as it is, so the store after the branch reaches the rest of the program.
+
+\subsection{Desugaring \texttt{rec} into \texttt{fix}}
+
+The Racket \code{fix} of \Cref{sec:cycles} can be written in our language too. Our functions take exactly one argument, so the function passed to \code{fix} takes the recursive call first and returns a function of \code{x}: it is \code{(lambda f (lambda x e))} instead of \code{(lambda (rec n) ...)}. Then
+\begin{lstlisting}
+(rec f x e)  =  (fix (lambda f (lambda x e)))
+\end{lstlisting}
+and \code{fix} is an ordinary program in our language, parsed once:
+\begin{lstlisting}
+(define fix
+  (parse
+   '(lambda f
+      (let b (box 0)
+        (let frec (lambda x ((f (unbox b)) x))
+          (begin
+            (set-box! b frec)
+            frec))))))
+\end{lstlisting}
+The \code{recC} case builds the application and evaluates it:
+\begin{lstlisting}
+    [recC (f x e)
+          (eval-env env sto (appC fix (lambdaC f (lambdaC x e))))]
+\end{lstlisting}
+\code{fix} is an \tyname{Expr}, not a Racket function: the interpreter splices it into the program as if the programmer had written it. The pieces around it are \tyname{Expr} constructors too, \code{(lambdaC f (lambdaC x e))} and not a \code{closV}, because \code{eval-env} evaluates them into closures itself. With this version, \code{recC} produces an ordinary \code{closV}, so the \code{recV} value of \Cref{sec:recproblem} is no longer needed. Both examples of \Cref{sec:recproblem} still give 720 and 8.
+
+\subsubsection{What \code{fix} does} The steps are those of the Racket \code{fix}. \code{b} is the placeholder box, holding 0 because the language has no symbols. \code{frec} is created inside the scope of \code{b}. \code{set-box!} puts \code{frec} into \code{b}, and \code{fix} returns \code{frec}. When the program calls \code{frec} with an argument \code{v}:
+\begin{enumerate}
+  \item \code{(unbox b)} fetches \code{frec} itself from the store;
+  \item \code{(f frec)} returns the real function \code{(lambda x e)}, closed over an environment in which \code{f} is \code{frec};
+  \item that function is applied to \code{v}, and every call to \code{f} in \code{e} is a call to \code{frec}, which repeats from step 1.
+\end{enumerate}
+So the real function is rebuilt at every call; only \code{frec} exists once. The store after the factorial example shows the backpatch. It holds two cells for location 0, the newer one on top:
+\begin{lstlisting}[style=repl]
+(list (cell 0 (closV [b = (boxV 0), f = (closV '() 'f (lambdaC 'x ...))]
+                     'x
+                     ((f (unbox b)) x)))      ; frec, written by set-box!
+      (cell 0 (numV 0)))                      ; the placeholder, written by box
+\end{lstlisting}
+\code{frec}'s environment contains \code{(boxV 0)}, and location 0 contains \code{frec}: this is the cycle, running through the store.
+
+\subsubsection{No fresh names needed} The names \code{b} and \code{frec} are bound inside \code{fix}'s body, and \code{e} is not written inside that body. \code{e} is part of the argument \code{(lambda f (lambda x e))}, which is evaluated in the environment of the \code{rec}, before \code{fix} binds anything. By lexical scope, \code{fix}'s names are invisible to \code{e}, even when \code{e} uses the same names from outside:
+\begin{lstlisting}[style=repl]
+(let b 100 ((rec g n (if0 n b (g (+ n -1)))) 3))
+---> 100
+\end{lstlisting}
+The \code{b} in the body is the outer \code{b}, not \code{fix}'s box.
+
+\subsection{Inlining \texttt{fix}}
+
+Instead of calling \code{fix}, \code{recC} can write the backpatching out in place. Writing \code{z} for a fresh name,
+\begin{lstlisting}
+(rec f x e)
+  =  (let z (box 0)
+       (let f (lambda x ((unbox z) x))
+         (begin (set-box! z (lambda x e))
+                f)))
+\end{lstlisting}
+The roles are swapped compared with \code{fix}. Here \code{f} is the forwarding function, and the box holds the real function \code{(lambda x e)}, which is created inside \code{(let f ...)} so its closure can see \code{f}. As a \code{recC} case:
+\begin{lstlisting}
+    [recC (f x e)
+          (let ([z (gensym)])
+            (eval-env env sto
+                      (letC z (boxC (numC 0))
+                            (letC f (lambdaC x (appC (unboxC (idC z)) (idC x)))
+                                  (seqC (setboxC (idC z) (lambdaC x e))
+                                        (idC f))))))]
+\end{lstlisting}
+Now \code{e} \emph{is} written inside the scope of \code{z}, so the box's name must be fresh. It comes from \code{gensym}, imported with \code{typed-in} as in \Cref{sec:capavoid}. A fixed name such as \code{'z} would shadow any \code{z} that \code{e} uses from outside:
+\begin{lstlisting}[style=repl]
+(let z 100 ((rec g n (if0 n z (g (+ n -1)))) 3))
+---> 100        with gensym
+---> a box      with the fixed name 'z
+\end{lstlisting}
+
+\begin{keypoint}[A closed helper needs no fresh names]
+A desugaring that puts the user's code inside new binders has to invent fresh names for them. Passing the user's code as an \emph{argument} to a closed function such as \code{fix} avoids the problem: lexical scope keeps the helper's names and the user's names apart.
+\end{keypoint}
+
+\subsection{Why a Forwarding Function?}
+
+In \code{fix}, \code{frec} is not the box, and not the result of \code{(f (unbox b))} either. It is a small function that does the unboxing when it is called. The two simpler choices both fail.
+
+\paragraph{Return the box.} If \code{fix} returned \code{b} itself, the program would get a \code{boxV}, and a call such as \code{(fact 6)} would apply a box, which is an error. The body would have to write \code{((unbox f) (+ x -1))}, as the Racket version of \Cref{sec:cycles} does. But the point of \code{rec} is that the programmer calls \code{f} like any other function.
+
+\paragraph{Unbox right away.} Write \code{(let frec (f (unbox b)) ...)} instead. Our \code{let} is eager, so \code{(unbox b)} runs at once, before \code{set-box!}. \code{f} receives the placeholder 0 as its recursive call, and the first recursive call in \code{e} applies the number 0. Patching the box later changes nothing, since 0 has already been passed.
+
+\paragraph{The forwarding function.} \code{(lambda x ((f (unbox b)) x))} is a function, so the program can call it directly. Creating it does not run \code{(unbox b)}. The unbox runs only when \code{frec} is called, and by then the box has been patched. The inlined version's \code{(lambda x ((unbox z) x))} works for the same reason.
+
+\begin{keypoint}[Delaying with a \code{lambda}]
+Replacing an expression \code{g} by \code{(lambda x (g x))} is called \emph{$\eta$-expansion}. Both behave the same when called, but the second one evaluates \code{g} only at the call. This is the tool for any value that is not ready now but will be ready by the time it is used. The Z combinator of \Cref{sec:rec7} uses it to get recursion with no boxes at all.
+\end{keypoint}
+
+\begin{remark}
+Two other designs avoid the forwarding function. One substitutes \code{(unbox z)} for \code{f} in \code{e}, which needs the capture-avoiding substitution of \Cref{sec:capavoid}. The other uses mutable variables, where the environment maps names to locations (\Cref{sec:rec6}): bind \code{f} to a placeholder, create the closure, and then \code{set!} \code{f} to it. That is how Racket's \code{letrec} behaves.
+\end{remark}

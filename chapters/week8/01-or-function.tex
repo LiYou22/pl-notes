@@ -1,0 +1,35 @@
+\section{Why \texttt{or} Is Not a Function}
+\label{sec:orfun}
+
+Racket's \code{or} stops at the first argument that is true. In
+\begin{lstlisting}
+(or #t (print "Hello World!"))
+\end{lstlisting}
+the first argument is already \code{\#t}, so the result is \code{\#t} and the \code{print} never runs: nothing is printed.
+
+The obvious attempt to write our own \code{or} is a function:
+\begin{lstlisting}
+(define (my-or1 a b)
+  (if a #t b))
+\end{lstlisting}
+Its body looks right: if \code{a} is true, answer \code{\#t} without looking at \code{b}. But the call prints:
+\begin{lstlisting}[style=repl]
+> (my-or1 #t (print "hello world"))
+"hello world"#t
+\end{lstlisting}
+\code{print} writes the string with its quotes and no newline, and the REPL then prints the result \code{\#t} right after it. Writing the body out by hand, with the argument expression in place of \code{b}, does not print:
+\begin{lstlisting}[style=repl]
+> (if #t #t (print "hello world"))
+#t
+\end{lstlisting}
+So the function and its inlined body behave differently. Racket evaluates every argument of a function call before the body runs (eager, call-by-value evaluation, as in our interpreters since \Cref{sec:closures}). By the time the \code{if} inside \code{my-or1} looks at \code{a}, the side effect in \code{b} has already happened. The body cannot undo that.
+
+\begin{keypoint}
+A function receives values, not expressions. \code{or} has to decide \emph{whether} to evaluate its second argument, so it cannot be a function under call-by-value. It has to be a rewrite of the program text, done before evaluation: \code{(or a b)} becomes something like \code{(if a \#t b)}, where \code{b} sits in a branch of the \code{if} and is evaluated only if that branch is taken.
+\end{keypoint}
+
+The extra evaluation shows up through effects: printing, mutation, errors, and non-termination. For example, \code{(my-or1 \#t (car '()))} raises an error where \code{(or \#t (car '()))} returns \code{\#t}.
+
+\begin{remark}
+\code{my-or1} also differs from \code{or} in the value it returns: Racket's \code{or} returns the first true value itself, so \code{(or 5 \#f)} is \code{5}, while \code{(my-or1 5 \#f)} is \code{\#t}.
+\end{remark}

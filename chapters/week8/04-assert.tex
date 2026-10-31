@@ -1,0 +1,29 @@
+\section{Macros See the Code: \texttt{my-assert}}
+\label{sec:myassert}
+
+The macros so far needed control over \emph{when} an argument is evaluated. A macro can also use the argument's \emph{text}:
+\begin{lstlisting}
+(define-syntax-rule (my-assert e)
+  (unless e (printf "assertion failed: ~s\n" 'e)))
+\end{lstlisting}
+In the template, \code{e} appears twice. The first \code{e} is evaluated as the condition. The second is inside a quote: \code{'e} is \code{(quote e)}, and since \code{e} is a pattern variable it is replaced by the user's expression first, so the quote produces that expression as data. An assertion that holds, such as
+\begin{lstlisting}
+(my-assert (= (+ 1 1) 2))
+\end{lstlisting}
+prints nothing: the condition is true, so \code{unless} returns \code{(void)}. A failing one,
+\begin{lstlisting}
+(my-assert (= (+ 1 1) 3))
+\end{lstlisting}
+expands to
+\begin{lstlisting}
+(unless (= (+ 1 1) 3) (printf "assertion failed: ~s\n" '(= (+ 1 1) 3)))
+\end{lstlisting}
+and prints \code{assertion failed: (= (+ 1 1) 3)}: the expression as written, not its value \code{\#f} and not a simplified form. The \code{\textasciitilde s} directive of \code{printf} prints a value the way \code{write} does.
+
+\begin{keypoint}
+A function \code{(define (my-assert v) \dots)} would receive only \code{\#f} and could not report which assertion failed. A macro receives the expression itself, so it can both evaluate it and print it.
+\end{keypoint}
+
+\begin{remark}
+In this file, \code{unless} is the macro defined earlier, which takes exactly one body expression. The template uses it with one, so it works with either version.
+\end{remark}

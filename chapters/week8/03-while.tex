@@ -1,0 +1,42 @@
+\section{A Loop: \texttt{my-while}}
+\label{sec:mywhile}
+
+\code{(my-while test body)} should evaluate \code{body} again and again as long as \code{test} is true. Like \code{or}, it cannot be a function: \code{test} and \code{body} must be evaluated many times, and a function receives each argument once, already evaluated.
+
+\subsection{A Macro That Never Stops Expanding}
+
+The first attempt mirrors the definition of a while loop: if the test holds, run the body and then the whole loop again.
+\begin{lstlisting}
+(define-syntax-rule (my-while test body)
+  (cond [test (begin body (my-while test body))] [else (void)]))
+\end{lstlisting}
+The definition itself is accepted. The problem appears at the first use. The expander replaces \code{(my-while test body)} by the template, and the template contains \code{(my-while test body)} again, which the expander must also replace, and so on. Expansion happens before the program runs, so \code{test} has no value yet and nothing can stop the unfolding: expansion never terminates, and the program never starts.
+
+\begin{keypoint}
+A macro that uses itself in its template must make the recursive use \emph{smaller} (fewer arguments, a shorter list), so that expansion reaches a base case. Repetition that depends on run-time values, such as a loop condition, cannot be done by expansion. It has to be done by run-time code that the macro generates.
+\end{keypoint}
+
+\subsection{Generating a Recursive Function}
+
+The fix moves the recursion from expansion time to run time. The macro expands, once, into a recursive function and a call to it:
+\begin{lstlisting}
+(define-syntax-rule (my-while test body)
+  (begin (define (loop)
+           (if test (begin body (loop)) (void)))
+         (loop)))
+\end{lstlisting}
+Here \code{(loop)} inside the template is an ordinary function call, not a macro use, so the expander leaves it alone. At run time, each call of \code{loop} evaluates \code{test} afresh; if it is true, it runs \code{body} and calls \code{loop} again, and if it is false, it returns \code{(void)}. The \code{test} and \code{body} expressions are pasted into the body of \code{loop}, which is exactly what makes them run once per iteration.
+
+Using it:
+\begin{lstlisting}
+(define b (box 0))
+
+(my-while (< (unbox b) 3)
+          (begin (print "Hello!")
+                 (set-box! b (+ 1 (unbox b)))))
+\end{lstlisting}
+This prints \code{"Hello!"} three times, and \code{b} ends up holding 3.
+
+\begin{remark}
+The template defines a function named \code{loop}, and the user's \code{test} or \code{body} might mention a \code{loop} of their own. By hygiene (\Cref{sec:hygiene}), the \code{loop} written in the template and a \code{loop} written by the user are different variables, so the macro's helper cannot capture the user's name.
+\end{remark}

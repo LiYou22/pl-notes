@@ -1,0 +1,354 @@
+\section{Recitation 7: Recursion}
+\label{sec:rec7}
+
+This recitation asks two closely related questions: how to build a \emph{circular} data structure, and how to let something refer to \emph{itself} in its own definition. A plain \code{let} answers neither, for the reason of \Cref{sec:recproblem}: the right-hand side is evaluated before the name is bound. The recitation shows two ways around this. The first ties the knot with boxes, as in \Cref{sec:cycles}. The second uses \emph{fixed-point combinators}, which give recursion with no mutation at all. A challenge at the end uses one of them to implement \code{rec} in the interpreter. The code is plain \code{\#lang racket}, with tests written with \code{check-expect} from \code{test-engine/racket-tests}, except for the challenge, which is \code{plai-typed}.
+
+\subsection{Tying the Knot with Boxes}
+
+\code{self-box} is a box that contains itself, and \code{two-cycle} is two boxes that point to each other, $\code{b1} \to \code{b2} \to \code{b1}$:
+\begin{lstlisting}
+(define self-box
+  (let ([b (box 'dummy)])
+    (begin
+      (set-box! b b)
+      b)))
+(define two-cycle
+  (let* ([b1 (box 'dummy)]
+         [b2 (box b1)])
+    (begin
+      (set-box! b1 b2)
+      b1)))
+
+(check-expect (eq? (unbox self-box) self-box) #t)
+(check-expect (eq? (unbox (unbox two-cycle)) two-cycle) #t)
+(check-expect (eq? (unbox two-cycle) two-cycle) #f)
+\end{lstlisting}
+The tests use \code{eq?}, which asks whether two values are the \emph{same} object in memory. Unboxing \code{self-box} once gets back to it; \code{two-cycle} needs two steps, and one step gets to the other box. Racket prints the two values as \code{\#0='\#\&\#0\#} and \code{\#0='\#\&\#\&\#0\#} (\Cref{sec:cycles}).
+
+\begin{exercise}[Recursive functions with boxes]
+Implement factorial as \code{fact-box} by putting the function in a box, without letting \code{fact-box} call itself by name.
+\end{exercise}
+\begin{solution}
+This is the factorial of \Cref{sec:cycles}, with the call \code{((unbox fact) n)} at the end:
+\begin{lstlisting}
+(define (fact-box n)
+  (let* ([fact (box 'dummy)]
+         [fact-fun (lambda (k)
+                     (if (equal? k 0)
+                         1
+                         (* k ((unbox fact) (- k 1)))))])
+    (begin
+      (set-box! fact fact-fun)
+      ((unbox fact) n))))
+
+(check-expect (fact-box 0) 1)
+(check-expect (fact-box 5) 120)
+\end{lstlisting}
+\end{solution}
+
+\begin{pitfall}[\code{(unbox fact)} is the function, not the call]
+\code{(* k (unbox fact) (- k 1))} is also syntactically fine, but it multiplies three things: \code{k}, the function itself, and \code{k - 1}. It fails with \code{*: contract violation, expected: number?, given: \#<procedure:fact-fun>}. The test \code{(fact-box 0)} still passes, because the base case never reaches the multiplication, so only \code{(fact-box 5)} shows the bug. The call needs its own parentheses: \code{((unbox fact) (- k 1))}.
+\end{pitfall}
+
+\subsubsection{A loop with no recursive definition} What does this program do?
+\begin{lstlisting}
+(let ([nonterminating (box 'dummy)])
+  (begin
+    (set-box! nonterminating (lambda (x) ((unbox nonterminating) x)))
+    ((unbox nonterminating) 5)))
+\end{lstlisting}
+It runs forever, although nothing in it is defined in terms of itself. The loop is in the store, not in the program text. The \code{lambda} reaches the box through its environment, and after \code{set-box!} the box holds that same \code{lambda}. So each call unboxes the function and calls it again. \code{(define (loop x) (loop x))} loops for the same reason: a recursive \code{define} also ties a knot, and Racket ties it for us (\Cref{sec:recboxes}). The call is in tail position, so Racket does not grow the stack; memory use stays flat and the program simply never stops.
+
+\begin{exercise}[Circular linked lists]
+Write \code{circ-list}, which takes $n \ge 1$ and returns a circular list of $n$ boxes. Each box holds a pair \code{(cons value next)}. The head holds $n$, the next box $n - 1$, and so on down to 1, and the box holding 1 points back to the head:
+\[
+\text{head } (n) \to (n-1) \to \dots \to (1) \to \text{head}
+\]
+For $n < 1$, signal \code{(error 'circ-list "n must be at least 1")}. Use a recursive helper stored in a box, which takes a number \code{k} and a box \code{b}, fills \code{b} with \code{k} and the next box, and builds the rest of the list.
+\end{exercise}
+\begin{solution}
+Two knots are tied here. The head is allocated first as a placeholder, so the last box can point to it. And the helper \code{build} is recursive, so it lives in a box too:
+\begin{lstlisting}
+(define (circ-list n)
+  (if (< n 1)
+      (error 'circ-list "n must be at least 1")
+      (let* ([head (box 'dummy)]
+             [build (box 'dummy)]
+             [build-fun
+              (lambda (k b)
+                (if (equal? k 1)
+                    (set-box! b (cons 1 head))
+                    (let ([next-box (box 'dummy)])
+                      (begin
+                        (set-box! b (cons k next-box))
+                        ((unbox build) (- k 1) next-box)))))])
+        (begin
+          (set-box! build build-fun)
+          ((unbox build) n head)
+          head))))
+\end{lstlisting}
+\code{build} fills the box it is given, which is the head on the first call, and allocates the next box only when $k > 1$. The box for 1 is filled with \code{head} instead of a new box, which closes the cycle. With the helpers
+\begin{lstlisting}
+(define (node-value b) (car (unbox b)))
+(define (node-next b) (cdr (unbox b)))
+\end{lstlisting}
+the expected results are
+\begin{lstlisting}
+(define circ-1 (circ-list 1))
+(define circ-3 (circ-list 3))
+(check-expect (node-value circ-3) 3)
+(check-expect (node-value (node-next circ-3)) 2)
+(check-expect (eq? (node-next circ-1) circ-1) #t)
+(check-expect (eq? (node-next circ-3) circ-3) #f)
+(check-expect (eq? (node-next (node-next (node-next circ-3))) circ-3) #t)
+(check-error (circ-list 0) "circ-list: n must be at least 1")
+\end{lstlisting}
+\code{circ-1} is a one-box cycle, like \code{self-box}, so its next box is itself. Racket prints \code{(circ-list 3)} as \code{\#0='\#\&(3 . \#\&(2 . \#\&(1 . \#0\#)))}.
+\end{solution}
+
+\begin{exercise}[Recursive trees]
+A tree is \code{(leaf $v$)} or \code{(node $t_1$ $t_2$)}, written as an s-expression \code{'(leaf v)} or \code{'(node left right)}. Write \code{tree-box}, which turns a nested list into a tree: a number becomes a leaf, \code{(list l r)} becomes a node, and anything else is an error \code{"tree: not a tree"}. Tie the knot with a box; \code{tree-box} must not call itself by name.
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+input & output \\
+\midrule
+\code{5} & \code{'(leaf 5)} \\
+\code{(list 5 (list 6 7))} & \code{'(node (leaf 5) (node (leaf 6) (leaf 7)))} \\
+\code{(list 1 2 3)} & error \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{exercise}
+\begin{solution}
+The pattern \code{(? number? n)} matches any number and binds it to \code{n}. A node needs two recursive calls, one for each subtree:
+\begin{lstlisting}
+(define (tree-box input)
+  (let* ([tree (box 'dummy)]
+         [tree-fun
+          (lambda (t)
+            (match t
+              [(? number? n) (list 'leaf n)]
+              [(list left right) (list 'node ((unbox tree) left) ((unbox tree) right))]
+              [_ (error 'tree "not a tree")]))])
+    (begin
+      (set-box! tree tree-fun)
+      ((unbox tree) input))))
+
+(check-expect (tree-box 5) '(leaf 5))
+(check-expect (tree-box (list 5 (list 6 7)))
+              '(node (leaf 5) (node (leaf 6) (leaf 7))))
+(check-error (tree-box (list 1 2 3)) "tree: not a tree")
+(check-error (tree-box (list 5 (list 6))) "tree: not a tree")
+\end{lstlisting}
+\code{(list 5 (list 6))} is an error because the inner list has one element, which matches neither a number nor a two-element list. The pitfall above applies here as well: \code{(list 'node ((unbox tree) left) (unbox tree) right)} builds a list of four elements, with the function itself as the third one.
+\end{solution}
+
+\subsection{Recursion without Mutation}
+
+Can we get recursion without boxes? The idea is that a function does not refer to itself. Instead, it takes ``the recursive call'' as an argument, as the function passed to \code{fix} in \Cref{sec:cycles} does, but one argument at a time:
+\begin{lstlisting}
+(define fact-gen
+  (lambda (rec)
+    (lambda (n)
+      (if (equal? 0 n)
+          1
+          (* n (rec (- n 1)))))))
+\end{lstlisting}
+\code{fact-gen} is not factorial. Given a function \code{rec} that computes factorial, it returns a function that computes factorial too, by doing one step and leaving the rest to \code{rec}. What we need is a function that is not changed by \code{fact-gen}.
+
+\begin{definition}[Fixed point]
+A \emph{fixed point} of a function $f$ is a value $v$ with $f(v) = v$. A \emph{fixed-point combinator} is a function $Y$ such that, for every $f$,
+\[
+Y\ f = f\ (Y\ f),
+\]
+that is, $Y\ f$ is a fixed point of $f$.
+\end{definition}
+If such a $Y$ exists, \code{(Y fact-gen)} is factorial, because unfolding the equation once gives exactly the factorial step:
+\begin{lstlisting}[style=repl]
+Y fact-gen
+=  fact-gen (Y fact-gen)
+=  (lambda (n) (if (equal? 0 n) 1 (* n ((Y fact-gen) (- n 1)))))
+\end{lstlisting}
+Here \code{=} means the two sides are equal, but not by a single evaluation step; \code{=>} below is one step.
+
+\subsubsection{The Y combinator} One such $Y$ is
+\begin{lstlisting}
+(define Y
+  (lambda (h)
+    ((lambda (x) (h (x x)))
+     (lambda (x) (h (x x))))))
+\end{lstlisting}
+The trick is \emph{self-application}, \code{(x x)}. The same function is written twice, and the first copy is applied to the second. So inside its body, \code{x} is that function itself, and \code{(x x)} rebuilds the whole application. \code{Y} satisfies the equation:
+\begin{lstlisting}[style=repl]
+Y f
+=> (lambda (x) (f (x x))) (lambda (x) (f (x x)))
+=> f ((lambda (x) (f (x x))) (lambda (x) (f (x x))))
+=  f (Y f)
+\end{lstlisting}
+The last step is \code{=}, not \code{=>}: the argument of \code{f} is what \code{(Y f)} stepped to on the first line, but nothing steps back to \code{(Y f)}.
+
+\subsubsection{Why \code{Y} loops in Racket} \code{(define fact-y (Y fact-gen))} never finishes. Write $W$ for \code{(lambda (x) (fact-gen (x x)))}. Then
+\begin{lstlisting}[style=repl]
+(Y fact-gen)
+=> (W W)
+=> (fact-gen (W W))
+=> (fact-gen (fact-gen (W W)))
+=> ...
+\end{lstlisting}
+Racket evaluates arguments eagerly, so before it can call \code{fact-gen}, it must evaluate the argument \code{(W W)}. That is the expression it started from, one step later. \code{fact-gen} is never called, although it would not even use \code{rec} right away: it would return a \code{lambda} at once.
+
+In a lazy language, \code{Y} works. The argument \code{(W W)} is passed unevaluated, as in the lazy substitution of \Cref{sec:lazy}. \code{fact-gen} returns its \code{(lambda (n) ...)}, and \code{(W W)} is evaluated only when the body calls \code{rec}, which unfolds one more level. A base case that does not call \code{rec} stops the unfolding.
+
+\begin{exercise}[The Z combinator]
+Write \code{Z}, the version of \code{Y} for eager evaluation. For every \code{f} and value \code{v} it satisfies
+\[
+Z\ f\ v = f\ (Z\ f)\ v.
+\]
+Hint: start from \code{Y}, and delay the self-application by wrapping it in a \code{lambda}: \code{(x x)} becomes \code{(lambda (v) ((x x) v))}.
+\end{exercise}
+\begin{solution}
+This is the $\eta$-expansion of \Cref{sec:recboxes}, applied to both copies of \code{(x x)}:
+\begin{lstlisting}
+(define Z
+  (lambda (h)
+    ((lambda (x) (h (lambda (v) ((x x) v))))
+     (lambda (x) (h (lambda (v) ((x x) v)))))))
+
+(define fact-z
+  (lambda (n) ((Z fact-gen) n)))
+
+(check-expect (fact-z 0) 1)
+(check-expect (fact-z 5) 120)
+\end{lstlisting}
+Write $W'$ for \code{(lambda (x) (fact-gen (lambda (v) ((x x) v))))}. Now
+\begin{lstlisting}[style=repl]
+(Z fact-gen)
+=> (W' W')
+=> (fact-gen (lambda (v) ((W' W') v)))
+=> (lambda (n) (if (equal? 0 n) 1 (* n (rec (- n 1)))))
+       where rec = (lambda (v) ((W' W') v))
+\end{lstlisting}
+The argument of \code{fact-gen} is a \code{lambda}, which is already a value, so \code{fact-gen} is called, and the result is a function. Evaluation stops there. \code{(W' W')} is evaluated only when \code{rec} is called, and then it produces the same function again, one level down:
+\begin{lstlisting}[style=repl]
+((Z fact-gen) 3)
+=> (* 3 (rec 2))
+=> (* 3 ((W' W') 2))
+=> (* 3 (* 2 (rec 1)))
+=> (* 3 (* 2 (* 1 (rec 0))))
+=> (* 3 (* 2 (* 1 1)))
+=> 6
+\end{lstlisting}
+Each line skips the steps that unfold \code{(W' W')} into the factorial function again.
+\end{solution}
+
+\begin{exercise}[Putting it together]
+Rewrite \code{tree-box} with \code{Z} instead of a box. First write \code{tree-gen}, which takes the recursive call as an argument, like \code{fact-gen}.
+\end{exercise}
+\begin{solution}
+The body of \code{tree-fun} is unchanged, except that the recursive call is the argument \code{rec} instead of \code{(unbox tree)}:
+\begin{lstlisting}
+(define tree-gen
+  (lambda (rec)
+    (lambda (t)
+      (match t
+        [(? number? n) (list 'leaf n)]
+        [(list left right) (list 'node (rec left) (rec right))]
+        [_ (error 'tree "not a tree")]))))
+(define tree-z
+  (lambda (t) ((Z tree-gen) t)))
+\end{lstlisting}
+The four tests of \code{tree-box} pass for \code{tree-z} as well.
+\end{solution}
+
+\subsubsection{\code{Z} versus \code{fix}} Both turn a function like \code{fact-gen} into a recursive function. \code{fix} ties the knot with a box: there is one \code{frec}, and it finds itself in the store. \code{Z} uses nothing but functions: the function never finds ``itself'', it rebuilds a copy with \code{(x x)} at every recursive call. (The Racket \code{fix} of \Cref{sec:cycles} takes \code{rec} and \code{n} together, \code{(lambda (rec n) ...)}; \code{Z} takes them one at a time, like the \code{fix} of \Cref{sec:recboxes}.)
+
+\subsection{Challenge: \texttt{rec} via \texttt{Z}}
+\label{sec:rec7-interp}
+
+The file \code{recitation7-interp.rkt} contains the interpreter of \Cref{sec:recproblem} with \code{if0C} and \code{recC}, but with no \code{recV} and no boxes: \tyname{Value} has only \code{numV} and \code{closV}. The task is to implement \code{rec} by rewriting it into a call to \code{Z}, as \Cref{sec:recboxes} rewrote it into a call to \code{fix}. A helper \code{run} parses and evaluates:
+\begin{lstlisting}
+(define (run (s : s-expression)) : Value
+  (eval (parse s)))
+\end{lstlisting}
+
+\begin{exercise}[Z in our language]
+Write \code{Z} as a program in our language. \code{lambda} takes exactly one argument, written \code{(lambda x body)}, and application is \code{(e1 e2)}.
+\end{exercise}
+\begin{solution}
+The Racket \code{Z} already uses one-argument functions only, so only the syntax changes:
+\begin{lstlisting}
+(define Z
+  (parse '(lambda h
+            ((lambda x (h (lambda v ((x x) v))))
+             (lambda x (h (lambda v ((x x) v))))))))
+
+(define fact-gen
+  (parse '(lambda self
+            (lambda n
+              (if0 n 1 (* n (self (+ n -1))))))))
+
+(test (eval (appC (appC Z fact-gen) (numC 0))) (numV 1))
+(test (eval (appC (appC Z fact-gen) (numC 5))) (numV 120))
+\end{lstlisting}
+In \code{fact-gen}, which the handout provides, the parameter is called \code{self} and not \code{rec}, because \code{rec} is a keyword of our language: \code{(rec (+ n -1))} would parse as a \code{rec} expression.
+\end{solution}
+
+\begin{exercise}[\code{rec}]
+Fill in the \code{recC} case of \code{eval-env}.
+\end{exercise}
+\begin{solution}
+Exactly as with \code{fix}, \code{(rec f x e)} becomes \code{(Z (lambda f (lambda x e)))}:
+\begin{lstlisting}
+    [recC (f x e) (eval-env env (appC Z (lambdaC f (lambdaC x e))))]
+\end{lstlisting}
+\code{(lambda f (lambda x e))} plays the role of \code{fact-gen}. All four tests pass:
+\begin{lstlisting}
+(test (run '((rec fact x (if0 x 1 (* x (fact (+ x -1))))) 5)) (numV 120))
+(test (run '(let fact (rec f x (if0 x 1 (* x (f (+ x -1)))))
+              (fact 6)))
+      (numV 720))
+(test (run '(let fibb (rec f x (if0 x
+                                    0
+                                    (if0 (+ x -1)
+                                         1
+                                         (+ (f (+ x -1)) (f (+ x -2))))))
+              (fibb 6)))
+      (numV 8))
+(test (run '(let k 10
+              (let f (rec g x (if0 x k (g (+ x -1))))
+                (f 3))))
+      (numV 10))
+\end{lstlisting}
+The last test checks that the body of a \code{rec} can still use variables from outside it. It passes for the reason of \Cref{sec:recboxes}: \code{Z} is a closed program, and the user's \code{e} is passed to it as an argument, so \code{Z}'s names \code{h}, \code{x}, and \code{v} never capture anything in \code{e}. That holds even though the tests use \code{x} as their own parameter name.
+\end{solution}
+
+\begin{exercise}[Y instead of Z]
+Replace \code{Z} by \code{Y} in the \code{recC} case and run the file again. What happens, and why?
+\end{exercise}
+\begin{solution}
+The \code{Z} tests still pass, but the first \code{rec} test never finishes, and memory use grows steadily until DrRacket is stopped. This is the loop of the Racket \code{Y}, one level down. Our language is eager too: \code{appC} evaluates the argument \code{e2} to a value before it runs the body. So \code{(h (x x))} evaluates \code{(x x)}, which evaluates \code{(h (x x))} again, without ever calling \code{h}. Unlike the Racket loop above, this one also grows the Racket stack: each \code{appC} evaluates its argument with a nested call to \code{eval-env}, which is not a tail call.
+\end{solution}
+
+\begin{exercise}[Three ways to implement \code{rec}]
+For each of \code{recV}, \code{fix}, and \code{Z}: does it need a new kind of \tyname{Value}? Does it need boxes (a store)?
+\end{exercise}
+\begin{solution}
+\begin{center}
+\begin{tabular}{@{}>{\raggedright}p{0.2\textwidth}>{\raggedright}p{0.24\textwidth}>{\raggedright}p{0.22\textwidth}>{\raggedright\arraybackslash}p{0.24\textwidth}@{}}
+\toprule
+& \code{recV} (\Cref{sec:recproblem}) & \code{fix} (\Cref{sec:recboxes}) & \code{Z} (this section) \\
+\midrule
+new kind of \tyname{Value} & yes, \code{recV} & no & no \\
+boxes / a store & no & yes & no \\
+interpreter changes & \code{appC} gets a case & only \code{recC} & only \code{recC} \\
+where the self-reference is & environment, rebound by each call & a cycle through the store & rebuilt by \code{(x x)} at each call \\
+\bottomrule
+\end{tabular}
+\end{center}
+\code{recV} changes the interpreter the most, but it is the most direct: the function's own name is bound to the function, at each call. \code{fix} and \code{Z} change nothing but \code{recC}, because both turn \code{rec} into a program the interpreter can already run. \code{fix} needs the language to have boxes. \code{Z} needs only \code{lambda} and application, which is why recursion needs no special support in an untyped language with first-class functions.
+\end{solution}
+
+\begin{remark}
+\code{Z} relies on \code{(x x)}, and this self-application cannot be typed directly in a language like \code{plai-typed}: \code{x} would need a type of functions whose argument has that same type. This is the same obstacle as the box that contains itself in \Cref{sec:cycles}. (A recursive \code{define-type} that wraps \code{x} gets around it.) Typed languages therefore usually build recursion in, as \code{define} and \code{letrec} are built into Racket.
+\end{remark}

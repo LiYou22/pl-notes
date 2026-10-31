@@ -1,0 +1,60 @@
+\section{Breaking Hygiene on Purpose: \texttt{aif}}
+\label{sec:aif}
+
+This section was not covered in lecture. It comes from the end of the posted lecture code.
+
+Hygiene (\Cref{sec:hygiene}) is almost always what we want, but occasionally a macro is \emph{meant} to bind a name that the user then writes. The standard example is the \emph{anaphoric if}. A common pattern is to compute a value, test it, and use it in a branch. With a division that returns \code{\#f} instead of failing,
+\begin{lstlisting}
+(define (safe-div x y)
+  (if (= y 0) #f (/ x y)))
+
+(let ([q (safe-div 10 2)])
+  (if q (+ q 1) 'undefined))
+\end{lstlisting}
+the \code{let} is boilerplate. An anaphoric if, \code{(aif test then-e else-e)}, binds the value of \code{test} to the fixed name \code{it}, so that the branches can refer to it: \code{(aif (safe-div 10 2) (+ it 1) 'undefined)}.
+
+\subsection{The Hygienic Version Fails}
+
+The obvious definition is
+\begin{lstlisting}
+(define-syntax (aif-broken stx)
+  (syntax-case stx ()
+    [(aif-broken test then-e else-e)
+     #'(let ([it test])
+         (if it then-e else-e))]))
+\end{lstlisting}
+and \code{(aif-broken (safe-div 10 2) (+ it 1) 'undefined)} fails with \code{it: unbound identifier}. This is hygiene doing its job, in the first direction of \Cref{sec:hygiene}: the \code{it} bound in the template comes from the macro, the \code{it} in \code{(+ it 1)} comes from the user, and a binding introduced by the template does not capture a name the user wrote. The user's \code{it} is looked up where it was written, where nothing named \code{it} is bound.
+
+\subsection{Choosing the Context of a Name}
+
+To make the binding visible to the user's code, the macro has to create an \code{it} that counts as written by the user:
+\begin{lstlisting}
+(define-syntax (aif stx)
+  (syntax-case stx ()
+    [(aif test then-e else-e)
+     (with-syntax ([it (datum->syntax stx 'it)])
+       #'(let ([it test])
+           (if it then-e else-e)))]))
+\end{lstlisting}
+\begin{itemize}
+  \item \code{(datum->syntax stx 'it)} turns the symbol \code{'it} into a syntax object, taking its lexical context from \code{stx}, the use of \code{aif} that the user wrote. The new identifier therefore behaves as if the user had written \code{it} at the use site.
+  \item \code{with-syntax} binds the pattern variable \code{it} to that syntax object, as if it had been matched by a pattern. In the template, both occurrences of \code{it} are pattern-variable references, so both are replaced by the user-context \code{it}, and the \code{let} now binds the same \code{it} that the branches refer to.
+\end{itemize}
+The transformer now runs code of its own before building the result, which is the case where \code{define-syntax-rule} is not enough and the full \code{syntax-case} form is needed (\Cref{sec:myor}). As intended,
+\begin{lstlisting}
+(aif (safe-div 10 2) (+ it 1) 'undefined)    ; 6
+(aif (safe-div 10 0) (+ it 1) 'undefined)    ; 'undefined
+\end{lstlisting}
+
+\subsection{The Price}
+
+The capture is now real, and it is not limited to the branches the macro author had in mind. It also hides any \code{it} the user already has:
+\begin{lstlisting}
+(let ([it "user's it"])
+  (aif #f 3 it))
+\end{lstlisting}
+The \code{else} branch looks as if it uses the user's \code{it}, but it is inside the binding made by \code{aif}, so it gets the test value, and the result is \code{\#f}, not \code{"user's it"}. This is the capture problem of the C preprocessor (\Cref{sec:rec5}), now created on purpose.
+
+\begin{keypoint}
+In a hygienic system, capture is the exception and has to be asked for explicitly, one name at a time, with \code{datum->syntax}. A macro that does so makes that name part of its interface: users must know that \code{aif} binds \code{it}, just as they know that \code{lambda} binds its parameters.
+\end{keypoint}

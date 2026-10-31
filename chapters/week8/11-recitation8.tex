@@ -1,0 +1,330 @@
+\section{Recitation 8: The Lambda Calculus}
+\label{sec:rec8}
+
+Our interpreters have kept growing: numbers, booleans, \code{let}, boxes, \code{rec}. This recitation goes the other way. It starts from a language with \emph{only} functions, the \emph{lambda calculus} (LC), and builds booleans, numbers, and recursion out of functions alone. The handout \code{recitation8.rkt} is written in \code{\#lang scribble/lp2}, a literate-programming language: the text and the code chunks render as a document, and the chunks run as a program with \code{check-expect} tests.
+
+\subsection{Syntax}
+
+LC has three kinds of terms:
+\[
+\mathit{LC} ::= x \mid \lambda x.\, e \mid e_1\ e_2
+\]
+written as s-expressions \code{(var x)}, \code{(lam x e)}, and \code{(app e1 e2)}. The identity function $\lambda x.\, x$ is \code{'(lam x (var x))}, and applying it to $y$ is \code{'(app (lam x (var x)) (var y))}.
+
+Terms are built and taken apart with \emph{quasiquote}. The backquote quotes a list, and each comma plugs a Racket value into it:
+\begin{lstlisting}
+`(app ,e1 ,e2)         ; = (list 'app e1 e2)
+\end{lstlisting}
+Inside a \code{match} pattern, the same notation takes a list apart: \code{\textasciigrave(app ,e1 ,e2)} matches any three-element list whose first element is \code{'app}, and binds \code{e1} and \code{e2}. A pattern \code{,(? symbol?)} matches any symbol without binding it.
+
+\subsection{Given: Renaming, Alpha-Equivalence, Substitution}
+
+The handout provides three functions on terms, which the exercises build on.
+
+\subsubsection{\code{is-lc?}} checks that an s-expression is a term, so \code{'(lam x x)} (body not a term) and \code{'(var 5)} (not a symbol) are rejected.
+
+\subsubsection{\code{(rename-var lc x x-new)}} renames the \emph{free} occurrences of \code{x} to \code{x-new}. It stops at a \code{lam} that binds \code{x} again, since the occurrences under it refer to that inner binder:
+\begin{lstlisting}
+(define (rename-var lc x x-new)
+  (match lc
+    [`(var ,v) (if (eq? v x) `(var ,x-new) lc)]
+    [`(lam ,v ,body)
+     (if (eq? v x)
+         lc
+         `(lam ,v ,(rename-var body x x-new)))]
+    [`(app ,e1 ,e2) `(app ,(rename-var e1 x x-new) ,(rename-var e2 x x-new))]))
+\end{lstlisting}
+\code{x-new} must be \emph{fresh}, that is, appear nowhere in \code{lc}. Otherwise it can be captured: renaming \code{x} to \code{y} in \code{'(lam y (var x))} would give \code{'(lam y (var y))}, a different function. The handout only calls \code{rename-var} with names from \code{gensym}, which are always fresh.
+
+\subsubsection{Alpha-equivalence} \code{'(lam x (var x))} and \code{'(lam y (var y))} are the same function; they differ only in the name of the bound variable.
+
+\begin{definition}[Alpha-equivalence]
+Two terms are \emph{alpha-equivalent} if they are equal up to a consistent renaming of bound variables.
+\end{definition}
+
+\code{equiv-LC} checks this by renaming the binders of two \code{lam}s to one fresh name and comparing the bodies:
+\begin{lstlisting}
+(define (equiv-LC lc1 lc2)
+  (match* (lc1 lc2)
+    [(`(var ,x1) `(var ,x2)) (eq? x1 x2)]
+    [(`(lam ,x1 ,body1) `(lam ,x2 ,body2))
+     (let ([x-new (gensym)])
+       (equiv-LC (rename-var body1 x1 x-new) (rename-var body2 x2 x-new)))]
+    [(`(app ,e11 ,e12) `(app ,e21 ,e22))
+     (and (equiv-LC e11 e21) (equiv-LC e12 e22))]
+    [(_ _) #f]))
+\end{lstlisting}
+\code{match*} matches several values at once. Free variables must be literally equal: \code{'(lam x (var y))} is not equivalent to \code{'(lam y (var y))}, because the first body mentions a free \code{y} and the second the bound one. Nested binders may also swap names, so $\lambda x.\, \lambda y.\, x\ y$ and $\lambda y.\, \lambda x.\, y\ x$ are equivalent.
+
+\subsubsection{Substitution} \code{(subst lc x arg)} replaces the free occurrences of \code{x} in \code{lc} by \code{arg}, avoiding capture:
+\begin{lstlisting}
+(define (subst lc x arg)
+  (match lc
+    [`(var ,v) (if (eq? v x) arg lc)]
+    [`(lam ,v ,body)
+     (if (eq? v x)
+         lc
+         (let ([v-new (gensym v)])
+           `(lam ,v-new ,(subst (rename-var body v v-new) x arg))))]
+    [`(app ,e1 ,e2) `(app ,(subst e1 x arg) ,(subst e2 x arg))]))
+\end{lstlisting}
+This is the capture-avoiding substitution of \Cref{sec:capavoid}, with a simplification: it renames the binder of \emph{every} \code{lam} it enters to a fresh name, whether or not capture could happen. Then no binder can capture a free variable of \code{arg}, and the code never has to compute which variables are free in \code{arg}. The cost is that results contain names like \code{y1825}, so tests compare them with \code{equiv-LC} instead of \code{equal?}. The capture case is
+\begin{lstlisting}
+(subst '(lam y (var x)) 'x '(var y))     ; alpha-equivalent to '(lam w (var y))
+\end{lstlisting}
+which must not become the identity function \code{'(lam y (var y))}.
+
+\subsection{Evaluation: Normal Order}
+
+\begin{definition}[Redex, normal form]
+A \emph{redex} is a function applied to an argument, \code{\textasciigrave(app (lam ,x ,body) ,arg)}. \emph{Reducing} it means substituting \code{arg} for \code{x} in \code{body}. A term with no redex anywhere in it is in \emph{normal form}, and the normal form is the answer.
+\end{definition}
+
+The interpreter of this recitation evaluates in \emph{normal order}, which differs from our earlier interpreters in three ways:
+\begin{itemize}
+  \item It reduces the \emph{outermost} redex first. \code{(app (lam x (var z)) (app (lam y (var y)) (var b)))} reduces at once to \code{(var z)}, without touching the argument. Racket and our interpreters would evaluate the argument first.
+  \item Among subterms, it goes \emph{left to right}.
+  \item It also reduces \emph{under} \code{lam}. Our interpreters treated a function as a value and never looked inside it; here \code{(lam x (app (lam y (var y)) (var x)))} steps to \code{(lam x (var x))}.
+\end{itemize}
+
+\begin{exercise}[One step]
+Write \code{(step-LC lc)}, which finds the redex that normal order picks, reduces it, and returns the new term, or returns \code{\#f} if \code{lc} has no redex. Before writing code, fill in the expected results of the handout's tests:
+\begin{lstlisting}
+(step-LC '(app (lam x (var x)) (var y)))
+(step-LC '(var x))
+(step-LC '(app (var f) (var a)))
+(step-LC '(app (lam x (var z)) (app (lam y (var y)) (var b))))
+(step-LC '(app (app (lam x (var x)) (var a)) (app (lam y (var y)) (var b))))
+(step-LC '(lam x (app (lam y (var y)) (var x))))
+\end{lstlisting}
+Hints from the handout: for an \code{app} that is not a redex, try to step \code{e1}, and if that returns \code{\#f}, try \code{e2}. The redex case must come before the general \code{app} case in the \code{match}, since every redex also matches \code{\textasciigrave(app ,e1 ,e2)}.
+\end{exercise}
+\begin{solution}
+The expected results, in order:
+\begin{lstlisting}
+'(var y)                                       ; the redex itself
+#f                                             ; a variable has no redex
+#f                                             ; f is not a lam
+'(var z)                                       ; outermost first; argument dropped
+'(app (var a) (app (lam y (var y)) (var b)))   ; left subterm first
+'(lam x (var x))                               ; under the lam
+\end{lstlisting}
+The fifth term is not itself a redex, since its function part is an \code{app}, not a \code{lam}. So the left subterm steps, and the right one is left for later. In the last test, \code{subst} enters no \code{lam}, so the result has no gensym names and \code{equal?} works.
+
+\code{step-LC} has one case per form, with the redex first:
+\begin{lstlisting}
+(define (step-LC lc)
+  (match lc
+    [`(app (lam ,x ,body) ,arg) (subst body x arg)]
+    [`(app ,e1 ,e2)
+     (let ([s1 (step-LC e1)])
+       (if s1
+           `(app ,s1 ,e2)
+           (let ([s2 (step-LC e2)])
+             (and s2 `(app ,e1 ,s2)))))]
+    [`(lam ,x ,body)
+     (let ([s (step-LC body)])
+       (and s `(lam ,x ,s)))]
+    [`(var ,_) #f]))
+\end{lstlisting}
+\code{(and s2 \dots)} is \code{\#f} when \code{s2} is \code{\#f}, and the rebuilt term otherwise. Each case encodes one rule of normal order. The redex case reduces the outermost redex before looking inside the argument. The \code{app} case goes left to right, trying \code{e2} only when \code{e1} has no redex. The \code{lam} case steps under the binder.
+\end{solution}
+
+\begin{exercise}[Normal form]
+Write \code{(interp-LC lc)}, which steps until no redex is left and returns the normal form.
+\end{exercise}
+\begin{solution}
+\begin{lstlisting}
+(define (interp-LC lc)
+  (let ([next (step-LC lc)])
+    (if next
+        (interp-LC next)
+        lc)))
+\end{lstlisting}
+\code{step-LC} returns \code{\#f} exactly when \code{lc} is in normal form, and that is the answer. The call is in tail position, so a long reduction does not grow the stack.
+\end{solution}
+
+Not every term has a normal form. The classic example is
+\[
+\Omega = (\lambda w.\, w\ w)\ (\lambda w.\, w\ w),
+\]
+\code{omega} in the handout. Its only redex substitutes the second copy for \code{w} in \code{(app (var w) (var w))}, which gives back $\Omega$ itself, so \code{(interp-LC omega)} runs forever. The test \code{(check-expect (step-LC omega) omega)} can use \code{equal?}: the body \code{(app (var w) (var w))} contains no \code{lam}, so \code{subst} renames nothing and the result is literally \code{omega} again.
+
+The handout's tests for \code{interp-LC} include
+\begin{lstlisting}
+(interp-LC `(app (lam x (var z)) ,omega))      ; should be '(var z)
+\end{lstlisting}
+
+\begin{exercise}[Discussion]
+What would an interpreter that evaluates arguments first, like Racket, do with \code{\textasciigrave(app (lam x (var z)) ,omega)}?
+\end{exercise}
+\begin{solution}
+It runs forever. Before calling \code{(lam x (var z))}, it evaluates the argument $\Omega$, which steps only to itself. Normal order calls the function first. The function never uses \code{x}, so $\Omega$ is thrown away without being evaluated. In general, if a term has a normal form, normal order is guaranteed to find it (the \emph{standardization theorem}). Evaluating arguments first can loop on such a term, as here.
+\end{solution}
+
+\subsection{Church Booleans}
+
+LC has no booleans, but they can be \emph{encoded} as functions. A boolean is a function that chooses between two arguments, \emph{true} picking the first and \emph{false} the second:
+\[
+\mathit{true} = \lambda x.\, \lambda y.\, x \qquad \mathit{false} = \lambda x.\, \lambda y.\, y
+\]
+\begin{lstlisting}
+(define LC-true  '(lam x (lam y (var x))))
+(define LC-false '(lam x (lam y (var y))))
+\end{lstlisting}
+\code{NF-to-bool} reads a normal form back as a Racket boolean, comparing with \code{equiv-LC}, and signals an error for anything else.
+
+\begin{exercise}[If]
+Define \code{LC-if}, a term that takes a boolean \code{c} and two terms \code{t} and \code{e}, one argument at a time, and returns \code{t} if \code{c} is true and \code{e} otherwise. The tests apply it as \code{\textasciigrave(app (app (app ,LC-if ,LC-true) (var yes)) (var no))}.
+
+Hint: a boolean already \emph{is} a choice between two arguments. What is left for \code{LC-if} to do?
+\end{exercise}
+\begin{solution}
+Nothing but passing the branches to the boolean: $\mathit{if} = \lambda c.\, \lambda t.\, \lambda e.\, c\ t\ e$.
+\begin{lstlisting}
+(define LC-if
+  '(lam c (lam t (lam e (app (app (var c) (var t)) (var e))))))
+\end{lstlisting}
+With $c = \mathit{true}$, $c\ t\ e$ reduces to $t$. Under normal order the branch not taken is never evaluated, so \code{LC-if} needs no special treatment. In Racket it does: there, \code{if} must be a special form, and a function \code{my-if} fails (\Cref{sec:myor}).
+\end{solution}
+
+\begin{exercise}[Not, And]
+Define \code{LC-not} and \code{LC-and} in the same style. \code{LC-true} and \code{LC-false} can be plugged in with quasiquote.
+
+Hint: write each one as ``if \dots{} then \dots{} else \dots'' first, and then use that a boolean is its own \code{if}.
+\end{exercise}
+\begin{solution}
+$\mathit{not}\ b$ is ``if $b$ then false else true'', and $\mathit{and}\ a\ b$ is ``if $a$ then $b$ else false''. Since a boolean applied to two terms is already an \code{if}:
+\begin{lstlisting}
+(define LC-not
+  `(lam b (app (app (var b) ,LC-false) ,LC-true)))
+(define LC-and
+  `(lam a (lam b (app (app (var a) (var b)) ,LC-false))))
+\end{lstlisting}
+The commas plug the terms \code{LC-false} and \code{LC-true} in. Without the quasiquote, \code{'(\dots{} LC-false \dots)} would contain the symbol \code{LC-false}, which is not a term. \code{LC-and} returns $b$ itself when $a$ is true, just as \code{and} in Racket returns its last argument.
+\end{solution}
+
+\subsection{Church Numerals}
+
+The natural number $n$ is encoded as the function that applies $f$ to $x$, $n$ times:
+\[
+\bar 0 = \lambda f.\, \lambda x.\, x \qquad
+\bar 1 = \lambda f.\, \lambda x.\, f\ x \qquad
+\bar 2 = \lambda f.\, \lambda x.\, f\ (f\ x) \qquad
+\bar 3 = \lambda f.\, \lambda x.\, f\ (f\ (f\ x))
+\]
+These are \emph{Church numerals}. \code{(LC-nat n)} builds the numeral for a Racket number, and \code{NF-to-nat} reads a normal form back by counting the \code{f}s. It works for any names of the two binders, so the gensym names in a result do not matter.
+
+\begin{exercise}[Arithmetic]
+Define \code{LC-succ}, \code{LC-add}, and \code{LC-mul}. Each takes numerals and returns a numeral, a term of the form $\lambda f.\, \lambda x.\, \dots$. Hints from the handout:
+\begin{itemize}
+  \item $n\ f\ x$ applies $f$ to $x$, $n$ times. Successor applies it once more.
+  \item $m + n$: apply $f$ $n$ times, then $m$ more times.
+  \item $m \times n$: $n\ f$ is a function that applies $f$ $n$ times. Apply \emph{that} $m$ times.
+\end{itemize}
+The tests include $0 \times 7$ and $3 \times 0$.
+\end{exercise}
+\begin{solution}
+Each definition takes its numerals, then $f$ and $x$, and builds the body from the hint:
+\begin{align*}
+\mathit{succ} &= \lambda n.\, \lambda f.\, \lambda x.\, f\ (n\ f\ x) \\
+\mathit{add} &= \lambda m.\, \lambda n.\, \lambda f.\, \lambda x.\, m\ f\ (n\ f\ x) \\
+\mathit{mul} &= \lambda m.\, \lambda n.\, \lambda f.\, \lambda x.\, m\ (n\ f)\ x
+\end{align*}
+\begin{lstlisting}
+(define LC-succ
+  '(lam n (lam f (lam x (app (var f) (app (app (var n) (var f)) (var x)))))))
+(define LC-add
+  '(lam m (lam n (lam f (lam x (app (app (var m) (var f))
+                                    (app (app (var n) (var f)) (var x))))))))
+(define LC-mul
+  '(lam m (lam n (lam f (lam x (app (app (var m) (app (var n) (var f)))
+                                    (var x)))))))
+\end{lstlisting}
+In \code{LC-add}, $n\ f\ x$ is $f$ applied $n$ times to $x$, and $m\ f$ applies $f$ $m$ more times to that. In \code{LC-mul}, $n\ f$ is ``apply $f$ $n$ times'', and $m$ repeats that $m$ times, $m \cdot n$ applications in total. The zero cases need no special handling. For $0 \times 7$, $\bar 0$ ignores its function and returns $x$. For $3 \times 0$, $\bar 0\ f$ is the identity, and three identities applied to $x$ give $x$.
+
+Because normal order reduces under \code{lam}, the result is a numeral in normal form, which is what \code{NF-to-nat} expects. The shorter $\mathit{mul} = \lambda m.\, \lambda n.\, \lambda f.\, m\ (n\ f)$ also passes the tests: $m$ is a numeral, so $m\ (n\ f)$ reduces to a $\lambda x.\, \dots$ itself.
+\end{solution}
+
+\subsubsection{Given: zero test and predecessor} \code{LC-is-zero} applies the constant function $\lambda u.\, \mathit{false}$ to $\mathit{true}$, $n$ times. Zero applications leave $\mathit{true}$, and one or more give $\mathit{false}$:
+\begin{lstlisting}
+(define LC-is-zero
+  `(lam n (app (app (var n) (lam u ,LC-false)) ,LC-true)))
+\end{lstlisting}
+
+\code{LC-pred} is famously tricky, and it is given:
+\begin{lstlisting}
+(define LC-pred
+  '(lam n
+     (lam f
+       (lam x
+         (app (app (app (var n)
+                        (lam g (lam h (app (var h)
+                                           (app (var g) (var f))))))
+                   (lam u (var x)))
+              (lam u (var u)))))))
+\end{lstlisting}
+It builds the result one $f$ at a time, but its starting value $\lambda u.\, x$ throws away the first $f$, so $n$ copies of $f$ become $n - 1$. The predecessor of $\bar 0$ is $\bar 0$. Wikipedia's ``Church encoding'' page has the details.
+
+\subsection{Challenge: Recursion with \texttt{Y}}
+
+In Recitation~7 (\Cref{sec:rec7}), \code{Y} looped forever in Racket and \code{Z} was needed instead. This part tries \code{Y} again, in LC with normal order.
+
+The handout provides Racket helpers that build bigger terms, so that not every \code{app} has to be written by hand. Their arguments are LC terms, so write \code{(SLC-zero? '(var n))}, not \code{(SLC-zero? 'n)}:
+\begin{lstlisting}
+(define (SLC-if c t e)  `(app (app (app ,LC-if ,c) ,t) ,e))
+(define (SLC-zero? e)   `(app ,LC-is-zero ,e))
+(define (SLC-pred e)    `(app ,LC-pred ,e))
+(define (SLC-mul e1 e2) `(app (app ,LC-mul ,e1) ,e2))
+\end{lstlisting}
+\code{SLC-if} and \code{SLC-mul} use your \code{LC-if} and \code{LC-mul}, so if the factorial tests fail, check those first.
+
+\begin{exercise}[Y and factorial]
+Write \code{LC-Y}, the Y combinator of \Cref{sec:rec7},
+\[
+Y = \lambda h.\, (\lambda x.\, h\ (x\ x))\ (\lambda x.\, h\ (x\ x)),
+\]
+as an LC term. Then write \code{LC-fact-gen}, the LC version of \code{fact-gen}: it takes the recursive call \code{fact} and returns a function of \code{n}. The tests check $0! = 1$, $3! = 6$, and $4! = 24$ via \code{\textasciigrave(app (app ,LC-Y ,LC-fact-gen) ,(LC-nat 3))}.
+\end{exercise}
+\begin{solution}
+\code{LC-Y} is the formula transcribed:
+\begin{lstlisting}
+(define LC-Y
+  '(lam h (app (lam x (app (var h) (app (var x) (var x))))
+               (lam x (app (var h) (app (var x) (var x)))))))
+\end{lstlisting}
+\code{LC-fact-gen} is \code{fact-gen} of \Cref{sec:rec7}, built with the helpers:
+\begin{lstlisting}
+(define LC-fact-gen
+  `(lam fact
+     (lam n
+       ,(SLC-if (SLC-zero? '(var n))
+                (LC-nat 1)
+                (SLC-mul '(var n)
+                         `(app (var fact) ,(SLC-pred '(var n))))))))
+\end{lstlisting}
+The comma before \code{(SLC-if \dots)} switches back to Racket, so the helpers run and build the body of the \code{lam}. The inner backquote starts a new quasiquote for the recursive call \code{(fact (pred n))}. All three tests pass. In the Python port used to check these solutions, $4!$ takes about 4100 steps.
+\end{solution}
+
+\begin{exercise}[Discussion]
+\leavevmode
+\begin{enumerate}
+  \item Why does \code{Y} work here, when it looped in Racket last week?
+  \item Does \code{(interp-LC \textasciigrave(app ,LC-Y ,LC-fact-gen))}, without a number, finish?
+  \item Write \code{Z} as an LC term. Does it compute factorial in LC? What about \code{Z} applied to \code{LC-fact-gen} alone, without a number?
+\end{enumerate}
+\end{exercise}
+\begin{solution}
+\begin{enumerate}
+  \item In Racket, \code{(Y fact-gen)} loops because the argument \code{(W W)} must be evaluated before \code{fact-gen} is called, and \code{(W W)} only unfolds into itself (\Cref{sec:rec7}). Normal order reduces the outermost redex first, so \code{fact-gen} is called with \code{(W W)} \emph{unevaluated}, as in the lazy evaluation of \Cref{sec:lazy}. \code{(W W)} unfolds one more level only when it reaches function position, that is, when factorial actually makes a recursive call. At $n = 0$, the \code{if} picks the base case, and the remaining copy of \code{(W W)} is discarded.
+  \item No. $Y\ \mathit{fact\mbox{-}gen}$ reduces to $\lambda n.\, \mathit{if}\ (\mathit{iszero}\ n)\ \bar 1\ (n \times (W\ W)\ (\mathit{pred}\ n))$. Here $n$ is a variable, so the test cannot decide between the branches. But normal order reduces under $\lambda$, and so inside both branches. In the second branch, $(W\ W)$ unfolds into another copy of the factorial body, which contains another $(W\ W)$, and so on. The term has no normal form, and \code{interp-LC} runs forever. With a number, the test decides, and the unfolding stops.
+  \item \code{Z} is \code{Y} with each \code{(x x)} wrapped in \code{(lam v \dots)}:
+\begin{lstlisting}
+(define LC-Z
+  '(lam h (app (lam x (app (var h) (lam v (app (app (var x) (var x)) (var v)))))
+               (lam x (app (var h) (lam v (app (app (var x) (var x)) (var v))))))))
+\end{lstlisting}
+  With a number, it computes factorial as well: $0!$ and $3!$ come out right, and $3!$ takes about the same number of steps as with \code{Y}. Without a number, it also runs forever. The \code{(lam v \dots)} delayed \code{(x x)} in Racket because Racket never evaluates inside a \code{lambda}. Normal order does reduce under \code{lam}, so the wrapper delays nothing, and \code{(x x)} unfolds forever as before.
+\end{enumerate}
+The lesson: \code{Y} versus \code{Z} is not a property of the combinators alone. It depends on the evaluation strategy, namely whether arguments are evaluated before the call and whether evaluation goes under $\lambda$.
+\end{solution}

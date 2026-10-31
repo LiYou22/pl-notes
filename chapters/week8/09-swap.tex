@@ -1,0 +1,59 @@
+\section{\texttt{swap}: A Macro That Mutates Variables}
+\label{sec:swap}
+
+The last example needs to change the caller's variables:
+\begin{lstlisting}
+(define r 100)
+(define s 20)
+(swap r s)        ; afterwards r should be 20 and s 100
+\end{lstlisting}
+
+\subsection{As a Function: It Does Nothing}
+
+\begin{lstlisting}
+(define (swap x y)
+  (let ([t y])
+    (set! y x)
+    (set! x t)))
+\end{lstlisting}
+\code{(swap r s)} runs without error, but \code{r} and \code{s} keep their values. Racket passes the \emph{values} 100 and 20. The parameters \code{x} and \code{y} are new variables, with their own locations in the store in the sense of \Cref{ch:week6}, initialized with copies of those values. The two \code{set!}s update the parameters' locations; \code{r}'s and \code{s}'s locations are never touched.
+
+\subsection{With Boxes: Pass the Locations}
+
+If the caller hands over boxes instead of numbers, the function can mutate what the boxes contain:
+\begin{lstlisting}
+(define (swap-box b1 b2)
+  (let ([t (unbox b2)])
+    (set-box! b2 (unbox b1))
+    (set-box! b1 t)))
+
+(define r-box (box 10))
+(define s-box (box 20))
+\end{lstlisting}
+After \code{(swap-box r-box s-box)}, \code{(unbox r-box)} is 20 and \code{(unbox s-box)} is 10. The parameters are still copies, but copies of box values, and a box value is a location: \code{b1} and \code{r-box} refer to the same box. This works, but only for data that the caller has put in boxes beforehand.
+
+\subsection{As a Macro: Rewrite the Caller's Code}
+
+\begin{lstlisting}
+(define-syntax (swap stx)
+  (syntax-case stx ()
+    [(swap x y)
+     #'(let ([t y])
+         (set! y x)
+         (set! x t))]))
+\end{lstlisting}
+Now \code{(swap r s)} expands, at the place where it is used, into
+\begin{lstlisting}
+(let ([t s])
+  (set! s r)
+  (set! r t))
+\end{lstlisting}
+The \code{set!}s name \code{r} and \code{s} themselves, so they update the caller's variables. No values are passed: the macro inserts code that refers to the variables directly.
+
+\begin{keypoint}
+A function receives values, so it can mutate only what it can reach from those values (the contents of a box, the fields of a mutable struct). A macro receives the caller's code, so it can expand into \code{set!} on the caller's own variables. This is the closest Racket comes to call-by-reference.
+\end{keypoint}
+
+\begin{remark}
+The template introduces \code{t}. If the user's variable is also named \code{t}, as in \code{(swap t s)}, a text macro would expand to \code{(let ([t s]) (set! s t) (set! t t))}, which swaps nothing. Racket's hygienic expander keeps the two \code{t}s apart (\Cref{sec:hygiene}), and the swap works. This is the \code{SWAP} example of Recitation~5 (\Cref{sec:rec5}).
+\end{remark}
